@@ -176,6 +176,26 @@ export function ProjectProvider({ children }) {
         if (insertedProj) {
           activeProj = insertedProj;
         }
+      } else if (
+        activeProj &&
+        activeProj.name.includes('SIGAAC') &&
+        myProfile &&
+        (myProfile.role === 'lider' || myProfile.role === 'admin')
+      ) {
+        const { data: updatedProj } = await supabase
+          .from('projects')
+          .update({
+            name: INITIAL_PROJECT.name,
+            code: INITIAL_PROJECT.code,
+            description: INITIAL_PROJECT.description,
+            objectives: INITIAL_PROJECT.objectives,
+          })
+          .eq('id', activeProj.id)
+          .select()
+          .single();
+        if (updatedProj) {
+          activeProj = updatedProj;
+        }
       }
 
       setProject(activeProj || INITIAL_PROJECT);
@@ -463,6 +483,31 @@ export function ProjectProvider({ children }) {
     setProfiles((prev) => prev.map((p) => (p.id === userId ? { ...p, ...updates } : p)));
     if (currentUser?.id === userId) {
       setCurrentUser((prev) => ({ ...prev, ...updates }));
+    }
+  };
+
+  const deleteUser = async (userId) => {
+    if (!isLeaderOrAdmin) {
+      throw new Error('Permiso denegado: solo el Líder o Administrador puede eliminar integrantes.');
+    }
+    if (userId === currentUser?.id) {
+      throw new Error('No puedes eliminar tu propia cuenta.');
+    }
+    const targetUser = profiles.find((p) => p.id === userId);
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('profiles').delete().eq('id', userId);
+      if (error) throw error;
+      await supabase.from('project_members').delete().eq('user_id', userId);
+    }
+    setProfiles((prev) => prev.filter((p) => p.id !== userId));
+    setProjectMembers((prev) => prev.filter((m) => m.user_id !== userId));
+
+    if (targetUser) {
+      await registerAutomaticChangelog({
+        title: `Integrante eliminado del equipo: ${targetUser.full_name}`,
+        description: `${currentUser?.full_name} eliminó la cuenta y asignación de ${targetUser.full_name} (${targetUser.email}).`,
+        entryType: 'cambio_estado',
+      });
     }
   };
 
@@ -1458,6 +1503,7 @@ export function ProjectProvider({ children }) {
     switchActiveRoleUser,
     updateMyProfile,
     adminUpdateUser,
+    deleteUser,
     createInvitationOrUser,
     updateProjectDetails,
     upsertProjectMemberResponsibility,

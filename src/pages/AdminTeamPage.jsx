@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Copy,
   Check,
+  Trash2,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { ROLE_CONFIG, getInitials } from '../utils/formatters';
@@ -27,6 +28,7 @@ export default function AdminTeamPage() {
     isLeaderOrAdmin,
     isAdmin,
     adminUpdateUser,
+    deleteUser,
     createInvitationOrUser,
     updateProjectDetails,
     upsertProjectMemberResponsibility,
@@ -275,19 +277,43 @@ export default function AdminTeamPage() {
                           </button>
 
                           {u.id !== currentUser?.id && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                adminUpdateUser(u.id, { is_active: !u.is_active })
-                              }
-                              className={`px-2.5 py-1 rounded-lg font-semibold ${
-                                u.is_active
-                                  ? 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                                  : 'text-emerald-600 hover:bg-emerald-50'
-                              }`}
-                            >
-                              {u.is_active ? 'Bloquear Acceso' : 'Habilitar'}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  adminUpdateUser(u.id, { is_active: !u.is_active })
+                                }
+                                className={`px-2.5 py-1 rounded-lg font-semibold mr-1.5 ${
+                                  u.is_active
+                                    ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                                    : 'text-emerald-600 hover:bg-emerald-50'
+                                }`}
+                                title={u.is_active ? 'Bloquear acceso al usuario' : 'Habilitar acceso'}
+                              >
+                                {u.is_active ? 'Bloquear' : 'Habilitar'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (
+                                    window.confirm(
+                                      `¿Estás seguro de eliminar permanentemente al integrante "${u.full_name}" del proyecto?`
+                                    )
+                                  ) {
+                                    try {
+                                      await deleteUser(u.id);
+                                    } catch (err) {
+                                      alert(err.message || 'Error al eliminar usuario.');
+                                    }
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 inline-flex items-center gap-1"
+                                title="Eliminar integrante del proyecto"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Eliminar</span>
+                              </button>
+                            </>
                           )}
                         </td>
                       )}
