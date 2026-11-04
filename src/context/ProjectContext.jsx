@@ -1,5 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  createIsolatedSupabaseClient,
+} from '../lib/supabase';
 import {
   INITIAL_PROFILES,
   INITIAL_INVITATIONS,
@@ -42,7 +46,7 @@ export function ProjectProvider({ children }) {
 
   // Estado de autenticación y carga
   const [currentUser, setCurrentUser] = useState(
-    isSupabaseConfigured ? null : INITIAL_PROFILES[1] // Por defecto en modo verificación inicia como Líder (Dra. Elena Vargas)
+    isSupabaseConfigured ? null : INITIAL_PROFILES[1]
   );
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [syncError, setSyncError] = useState(null);
@@ -51,15 +55,21 @@ export function ProjectProvider({ children }) {
   const [profiles, setProfiles] = useState(isSupabaseConfigured ? [] : INITIAL_PROFILES);
   const [invitations, setInvitations] = useState(isSupabaseConfigured ? [] : INITIAL_INVITATIONS);
   const [project, setProject] = useState(isSupabaseConfigured ? null : INITIAL_PROJECT);
-  const [projectMembers, setProjectMembers] = useState(isSupabaseConfigured ? [] : INITIAL_PROJECT_MEMBERS);
+  const [projectMembers, setProjectMembers] = useState(
+    isSupabaseConfigured ? [] : INITIAL_PROJECT_MEMBERS
+  );
   const [workPlan, setWorkPlan] = useState(isSupabaseConfigured ? [] : INITIAL_WORK_PLAN);
   const [tasks, setTasks] = useState(isSupabaseConfigured ? [] : INITIAL_TASKS);
   const [changelog, setChangelog] = useState(isSupabaseConfigured ? [] : INITIAL_CHANGELOG);
-  const [repositories, setRepositories] = useState(isSupabaseConfigured ? [] : INITIAL_REPOSITORIES);
-  const [notifications, setNotifications] = useState(isSupabaseConfigured ? [] : INITIAL_NOTIFICATIONS);
+  const [repositories, setRepositories] = useState(
+    isSupabaseConfigured ? [] : INITIAL_REPOSITORIES
+  );
+  const [notifications, setNotifications] = useState(
+    isSupabaseConfigured ? [] : INITIAL_NOTIFICATIONS
+  );
 
   // ---------------------------------------------------------------------------
-  // CARGA DE DATOS DESDE SUPABASE POSTGRESQL
+  // CARGA Y SINCRONIZACIÓN DE DATOS DESDE SUPABASE POSTGRESQL
   // ---------------------------------------------------------------------------
   const fetchAllSupabaseData = useCallback(async (activeUserId) => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -93,16 +103,85 @@ export function ProjectProvider({ children }) {
 
       if (profilesRes.error) throw profilesRes.error;
 
-      const loadedProfiles = profilesRes.data || [];
+      let loadedProfiles = profilesRes.data || [];
+
+      // Si el usuario autenticado aún no tenía fila en profiles, crearla automáticamente
+      if (activeUserId && !loadedProfiles.some((p) => p.id === activeUserId)) {
+        const {
+          data: { user: authUser },
+        } = await supabase.auth.getUser();
+        if (authUser) {
+          const defaultRole = loadedProfiles.length === 0 ? 'lider' : authUser.user_metadata?.role || 'integrante';
+          const { data: createdProfile } = await supabase
+            .from('profiles')
+            .upsert([
+              {
+                id: authUser.id,
+                email: authUser.email,
+                full_name:
+                  authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'Usuario',
+                role: defaultRole,
+                specialty: authUser.user_metadata?.specialty || 'Líder del Proyecto',
+                is_active: true,
+              },
+            ])
+            .select()
+            .single();
+          if (createdProfile) {
+            loadedProfiles = [...loadedProfiles, createdProfile];
+          }
+        }
+      }
+
       setProfiles(loadedProfiles);
       setInvitations(invitationsRes.data || []);
 
-      const currentProj = projectsRes.data && projectsRes.data.length > 0 ? projectsRes.data[0] : INITIAL_PROJECT;
-      setProject(currentProj);
+      const myProfile = activeUserId
+        ? loadedProfiles.find((p) => p.id === activeUserId)
+        : null;
+
+      // Seguridad: si la cuenta fue desactivada por el Administrador o Líder, cerrar sesión inmediatamente
+      if (myProfile && myProfile.is_active === false) {
+        await supabase.auth.signOut();
+        setCurrentUser(null);
+        throw new Error('Tu cuenta ha sido desactivada por el Administrador o Líder del proyecto.');
+      }
+
+      if (myProfile) {
+        setCurrentUser(myProfile);
+      }
+
+      // Si aún no existe un registro de proyecto en la tabla projects y el usuario es líder o admin, crearlo automáticamente
+      let activeProj = projectsRes.data && projectsRes.data.length > 0 ? projectsRes.data[0] : null;
+      if (!activeProj && myProfile && (myProfile.role === 'lider' || myProfile.role === 'admin')) {
+        const { data: insertedProj } = await supabase
+          .from('projects')
+          .insert([
+            {
+              name: INITIAL_PROJECT.name,
+              code: INITIAL_PROJECT.code,
+              description: INITIAL_PROJECT.description,
+              objectives: INITIAL_PROJECT.objectives,
+              leader_id: myProfile.id,
+              start_date: INITIAL_PROJECT.start_date,
+              end_date: INITIAL_PROJECT.end_date,
+              status: 'en_ejecucion',
+              repository_main_url: 'https://github.com/MAET211/seguimiento-proyecto',
+              methodology: INITIAL_PROJECT.methodology,
+              version: INITIAL_PROJECT.version,
+            },
+          ])
+          .select()
+          .single();
+        if (insertedProj) {
+          activeProj = insertedProj;
+        }
+      }
+
+      setProject(activeProj || INITIAL_PROJECT);
       setProjectMembers(membersRes.data || []);
       setWorkPlan(workPlanRes.data || []);
 
-      // Ensamblar tareas con sus responsables y evidencias
       const rawTasks = tasksRes.data || [];
       const rawAssignees = assigneesRes.data || [];
       const rawEvidences = evidencesRes.data || [];
@@ -117,20 +196,12 @@ export function ProjectProvider({ children }) {
       setChangelog(changelogRes.data || []);
       setRepositories(reposRes.data || []);
       setNotifications(notifRes.data || []);
-
-      if (activeUserId) {
-        const myProfile = loadedProfiles.find((p) => p.id === activeUserId);
-        if (myProfile) {
-          setCurrentUser(myProfile);
-        }
-      }
     } catch (err) {
       console.error('Error al sincronizar datos con Supabase:', err);
-      setSyncError(err.message || 'Error al consultar las tablas de Supabase. Asegúrate de haber ejecutado supabase/schema.sql.');
+      setSyncError(err.message || 'Error al consultar las tablas de Supabase.');
     }
   }, []);
 
-  // Suscripción a sesión de Supabase Auth y cambios en tiempo real
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
       setLoading(false);
@@ -165,7 +236,6 @@ export function ProjectProvider({ children }) {
       }
     });
 
-    // Canal Realtime para actualizar cuando cualquier integrante haga cambios
     const realtimeChannel = supabase
       .channel('nexuspm-realtime')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
@@ -185,7 +255,7 @@ export function ProjectProvider({ children }) {
   }, [fetchAllSupabaseData]);
 
   // ---------------------------------------------------------------------------
-  // FUNCIONES AUXILIARES DE TRAZABILIDAD (NOVEDADES AUTOMÁTICAS Y NOTIFICACIONES)
+  // TRAZABILIDAD AUTOMÁTICA Y NOTIFICACIONES
   // ---------------------------------------------------------------------------
   const registerAutomaticChangelog = async ({
     title,
@@ -209,7 +279,7 @@ export function ProjectProvider({ children }) {
       created_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data } = await supabase
         .from('changelog_entries')
         .insert([
@@ -278,88 +348,50 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // AUTENTICACIÓN Y GESTIÓN DE SESIÓN
+  // AUTENTICACIÓN SEGURA Y CONTROL DE ACCESO POR ROL
   // ---------------------------------------------------------------------------
   const login = async (email, password) => {
+    const normalizedEmail = email.trim().toLowerCase();
+
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
       if (error) throw error;
+
       if (data.user) {
+        // Verificar que la cuenta esté activa en profiles
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        if (prof && prof.is_active === false) {
+          await supabase.auth.signOut();
+          throw new Error(
+            'Acceso denegado: esta cuenta ha sido desactivada por el Administrador o Líder.'
+          );
+        }
+
         await fetchAllSupabaseData(data.user.id);
       }
       return data;
     }
 
-    // Modo verificación pre-conexión
-    const found = profiles.find((p) => p.email.toLowerCase() === email.trim().toLowerCase());
+    // Modo verificación local
+    const found = profiles.find((p) => p.email.toLowerCase() === normalizedEmail);
     if (!found) {
-      throw new Error('No se encontró una cuenta con ese correo. Usa una de las cuentas registradas o regístrate con invitación.');
+      throw new Error(
+        'Acceso denegado: este correo no ha sido registrado por el Líder del Proyecto.'
+      );
     }
     if (!found.is_active) {
       throw new Error('Esta cuenta ha sido desactivada por el Administrador.');
     }
     setCurrentUser(found);
     return { user: found };
-  };
-
-  const registerUserAccount = async ({ email, password, fullName, role = 'integrante', specialty = 'Desarrollador de Software' }) => {
-    const normalizedEmail = email.trim().toLowerCase();
-
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-            role,
-            specialty,
-          },
-        },
-      });
-      if (error) throw error;
-      if (data.user) {
-        await fetchAllSupabaseData(data.user.id);
-      }
-      return data;
-    }
-
-    // Verificar si hay invitación previa
-    const matchingInv = invitations.find((i) => i.email.toLowerCase() === normalizedEmail);
-    const assignedRole = matchingInv ? matchingInv.role : role;
-    const assignedSpec = matchingInv ? matchingInv.specialty : specialty;
-
-    const newProfile = {
-      id: `usr-${Date.now()}`,
-      email: normalizedEmail,
-      full_name: fullName,
-      role: assignedRole,
-      specialty: assignedSpec,
-      phone: '',
-      github_username: normalizedEmail.split('@')[0],
-      is_active: true,
-      created_at: new Date().toISOString(),
-    };
-
-    setProfiles((prev) => [...prev, newProfile]);
-    if (matchingInv) {
-      setInvitations((prev) =>
-        prev.map((inv) => (inv.id === matchingInv.id ? { ...inv, status: 'aceptada' } : inv))
-      );
-    }
-    setProjectMembers((prev) => [
-      ...prev,
-      {
-        id: `pm-${Date.now()}`,
-        project_id: project?.id || 'prj-main-01',
-        user_id: newProfile.id,
-        project_role: assignedSpec,
-        responsibilities: 'Integrante activo del proyecto asignado mediante registro controlado.',
-        weekly_hours: 20,
-      },
-    ]);
-    setCurrentUser(newProfile);
-    return { user: newProfile };
   };
 
   const resetPassword = async (email) => {
@@ -388,7 +420,7 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // ADMINISTRACIÓN DE USUARIOS, PERFILES E INVITACIONES (ADMIN / LÍDER)
+  // GESTIÓN DE USUARIOS Y CREACIÓN DE CUENTAS POR EL LÍDER / ADMINISTRADOR
   // ---------------------------------------------------------------------------
   const updateMyProfile = async (updates) => {
     if (!currentUser) return;
@@ -412,6 +444,9 @@ export function ProjectProvider({ children }) {
   };
 
   const adminUpdateUser = async (userId, updates) => {
+    if (!isLeaderOrAdmin) {
+      throw new Error('Permiso denegado: solo el Líder o Administrador puede modificar roles o estados.');
+    }
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from('profiles')
@@ -431,37 +466,135 @@ export function ProjectProvider({ children }) {
     }
   };
 
-  const createInvitationOrUser = async ({ email, full_name, role, specialty, responsibilities, weekly_hours = 20 }) => {
+  /**
+   * Permite al Líder o Administrador crear directamente la cuenta de acceso (correo + contraseña + rol)
+   * de cualquier integrante del equipo, Administrador o Líder sin cerrar la sesión actual del Líder.
+   */
+  const createInvitationOrUser = async ({
+    email,
+    password,
+    full_name,
+    role = 'integrante',
+    specialty = 'Desarrollador de Software',
+    responsibilities = 'Desarrollo de módulos asignados y reporte de avances.',
+    weekly_hours = 20,
+  }) => {
+    if (!isLeaderOrAdmin) {
+      throw new Error('Permiso denegado: solo el Líder o Administrador puede dar de alta integrantes.');
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
+      // 1. Registrar invitación con el rol oficial designado por el Líder
+      const { data: invData } = await supabase
         .from('invitations')
-        .insert([
-          {
-            email: normalizedEmail,
-            full_name,
-            role,
-            specialty,
-            invited_by: currentUser?.id,
-            status: 'pendiente',
-          },
-        ])
+        .upsert(
+          [
+            {
+              email: normalizedEmail,
+              full_name,
+              role,
+              specialty,
+              invited_by: currentUser?.id,
+              status: 'aceptada',
+            },
+          ],
+          { onConflict: 'email' }
+        )
         .select()
         .single();
-      if (error) throw error;
-      setInvitations((prev) => [data, ...prev]);
-      return data;
+
+      if (invData) {
+        setInvitations((prev) => [invData, ...prev.filter((i) => i.email !== normalizedEmail)]);
+      }
+
+      // 2. Crear la cuenta real en Supabase Auth usando el cliente aislado (no cierra la sesión del Líder)
+      const isolatedClient = createIsolatedSupabaseClient();
+      if (isolatedClient && password) {
+        const { data: signUpData, error: signUpErr } = await isolatedClient.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            data: {
+              full_name,
+              role,
+              specialty,
+            },
+          },
+        });
+
+        if (signUpErr) throw signUpErr;
+
+        const newAuthUserId = signUpData?.user?.id;
+        if (newAuthUserId) {
+          // Asegurar que el perfil tenga exactamente el rol designado por el Líder
+          const { data: profData } = await supabase
+            .from('profiles')
+            .upsert([
+              {
+                id: newAuthUserId,
+                email: normalizedEmail,
+                full_name,
+                role,
+                specialty,
+                is_active: true,
+              },
+            ])
+            .select()
+            .single();
+
+          if (profData) {
+            setProfiles((prev) => [
+              ...prev.filter((p) => p.id !== profData.id),
+              profData,
+            ]);
+          }
+
+          // Registrar su responsabilidad en el proyecto
+          if (project?.id && project.id !== 'prj-main-01') {
+            const { data: memberData } = await supabase
+              .from('project_members')
+              .upsert(
+                [
+                  {
+                    project_id: project.id,
+                    user_id: newAuthUserId,
+                    project_role: specialty,
+                    responsibilities,
+                    weekly_hours: Number(weekly_hours) || 20,
+                  },
+                ],
+                { onConflict: 'project_id,user_id' }
+              )
+              .select()
+              .single();
+
+            if (memberData) {
+              setProjectMembers((prev) => [...prev, memberData]);
+            }
+          }
+        }
+      }
+
+      await registerAutomaticChangelog({
+        title: `Alta de cuenta autorizada: ${full_name} (${role.toUpperCase()})`,
+        description: `${currentUser?.full_name} creó la cuenta de acceso para ${full_name} (${normalizedEmail}) con el rol de ${role.toUpperCase()} y cargo "${specialty}".`,
+        entryType: 'asignacion',
+      });
+
+      await fetchAllSupabaseData(currentUser?.id);
+      return;
     }
 
-    // En modo local creamos tanto el usuario activo como su membresía en el proyecto para que pueda asignársele tareas de inmediato
+    // Modo verificación local
     const newUserId = `usr-${Date.now()}`;
     const newProfile = {
       id: newUserId,
       email: normalizedEmail,
       full_name,
       role,
-      specialty: specialty || 'Desarrollador de Software',
+      specialty,
       phone: '',
       github_username: normalizedEmail.split('@')[0],
       is_active: true,
@@ -475,15 +608,15 @@ export function ProjectProvider({ children }) {
         id: `pm-${Date.now()}`,
         project_id: project?.id || 'prj-main-01',
         user_id: newUserId,
-        project_role: specialty || 'Integrante del Equipo',
-        responsibilities: responsibilities || 'Desarrollo de módulos y reporte de avances.',
+        project_role: specialty,
+        responsibilities,
         weekly_hours: Number(weekly_hours) || 20,
       },
     ]);
 
     await registerAutomaticChangelog({
-      title: `Nuevo integrante incorporado al equipo: ${full_name}`,
-      description: `${currentUser?.full_name} registró a ${full_name} con el rol de ${role.toUpperCase()} (${specialty}).`,
+      title: `Nuevo integrante registrado por el Líder: ${full_name}`,
+      description: `${currentUser?.full_name} dio de alta a ${full_name} con el rol de ${role.toUpperCase()} (${specialty}).`,
       entryType: 'asignacion',
     });
 
@@ -494,7 +627,7 @@ export function ProjectProvider({ children }) {
   // CONFIGURACIÓN DEL PROYECTO Y RESPONSABILIDADES DEL EQUIPO
   // ---------------------------------------------------------------------------
   const updateProjectDetails = async (updates) => {
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data, error } = await supabase
         .from('projects')
         .update({ ...updates, updated_at: new Date().toISOString() })
@@ -508,19 +641,28 @@ export function ProjectProvider({ children }) {
     }
 
     await registerAutomaticChangelog({
-      title: 'Actualización de parámetros generales del proyecto',
-      description: `${currentUser?.full_name} actualizó la configuración del proyecto "${updates.name || project?.name}".`,
+      title: 'Actualización de configuración general del proyecto',
+      description: `${currentUser?.full_name} actualizó los parámetros del proyecto "${updates.name || project?.name}".`,
       entryType: 'cronograma',
     });
   };
 
-  const upsertProjectMemberResponsibility = async ({ user_id, project_role, responsibilities, weekly_hours }) => {
+  const upsertProjectMemberResponsibility = async ({
+    user_id,
+    project_role,
+    responsibilities,
+    weekly_hours,
+  }) => {
     const existing = projectMembers.find((m) => m.user_id === user_id);
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       if (existing) {
         const { data, error } = await supabase
           .from('project_members')
-          .update({ project_role, responsibilities, weekly_hours: Number(weekly_hours) || 20 })
+          .update({
+            project_role,
+            responsibilities,
+            weekly_hours: Number(weekly_hours) || 20,
+          })
           .eq('id', existing.id)
           .select()
           .single();
@@ -570,7 +712,7 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // MÓDULO 3: TAREAS Y DELEGACIONES (CON FLUJO DE REVISIÓN Y EVIDENCIAS)
+  // MÓDULO 3: TAREAS Y DELEGACIONES
   // ---------------------------------------------------------------------------
   const createTask = async (taskInput) => {
     const {
@@ -587,7 +729,7 @@ export function ProjectProvider({ children }) {
 
     let createdTaskId = `tsk-${Date.now()}`;
 
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data: insertedTask, error } = await supabase
         .from('tasks')
         .insert([
@@ -696,9 +838,7 @@ export function ProjectProvider({ children }) {
       }
     }
 
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
-    );
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t)));
 
     if (updates.due_date && updates.due_date !== oldTask.due_date) {
       await registerAutomaticChangelog({
@@ -718,11 +858,15 @@ export function ProjectProvider({ children }) {
     }
   };
 
-  const updateTaskMemberProgress = async (taskId, { progress, status, deliverable_summary }) => {
+  const updateTaskMemberProgress = async (
+    taskId,
+    { progress, status, deliverable_summary }
+  ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
-    const nextStatus = status || (progress > 0 && targetTask.status === 'pendiente' ? 'en_proceso' : targetTask.status);
+    const nextStatus =
+      status || (progress > 0 && targetTask.status === 'pendiente' ? 'en_proceso' : targetTask.status);
 
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase
@@ -752,7 +896,9 @@ export function ProjectProvider({ children }) {
 
     await registerAutomaticChangelog({
       title: `Actualización de avance (${progress}%): ${targetTask.title}`,
-      description: `${currentUser?.full_name} actualizó el progreso de "${targetTask.title}" al ${progress}%. ${deliverable_summary ? `Detalle: ${deliverable_summary}` : ''}`,
+      description: `${currentUser?.full_name} actualizó el progreso de "${targetTask.title}" al ${progress}%. ${
+        deliverable_summary ? `Detalle: ${deliverable_summary}` : ''
+      }`,
       taskId,
       entryType: 'cambio_estado',
     });
@@ -760,7 +906,13 @@ export function ProjectProvider({ children }) {
 
   const submitTaskForLeaderReview = async (
     taskId,
-    { deliverable_summary, evidence_title, evidence_url, evidence_type = 'pull_request', evidence_description = '' }
+    {
+      deliverable_summary,
+      evidence_title,
+      evidence_url,
+      evidence_type = 'pull_request',
+      evidence_description = '',
+    }
   ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
@@ -822,7 +974,9 @@ export function ProjectProvider({ children }) {
               progress: 100,
               completed_at: nowIso,
               deliverable_summary,
-              evidences: newEvidenceObj ? [newEvidenceObj, ...(t.evidences || [])] : t.evidences || [],
+              evidences: newEvidenceObj
+                ? [newEvidenceObj, ...(t.evidences || [])]
+                : t.evidences || [],
             }
           : t
       )
@@ -837,7 +991,6 @@ export function ProjectProvider({ children }) {
       entryType: 'finalizacion',
     });
 
-    // Notificar a todos los líderes y administradores
     const leadersAndAdmins = profiles
       .filter((p) => p.role === 'lider' || p.role === 'admin')
       .map((p) => p.id);
@@ -852,7 +1005,6 @@ export function ProjectProvider({ children }) {
   };
 
   const reviewTaskByLeader = async (taskId, { decision, leader_feedback }) => {
-    // decision: 'aprobar' -> status = 'completada' | 'devolver' -> status = 'devuelta'
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
@@ -897,7 +1049,9 @@ export function ProjectProvider({ children }) {
         : `Tarea devuelta para correcciones: ${targetTask.title}`,
       description: `${currentUser?.full_name} ${
         isApproved ? 'aprobó satisfactoriamente' : 'devolvió con observaciones'
-      } la tarea "${targetTask.title}". Comentario del líder: "${leader_feedback || 'Sin comentarios adicionales'}"`,
+      } la tarea "${targetTask.title}". Comentario del líder: "${
+        leader_feedback || 'Sin comentarios adicionales'
+      }"`,
       taskId,
       entryType: isApproved ? 'aprobacion' : 'devolucion',
     });
@@ -906,7 +1060,9 @@ export function ProjectProvider({ children }) {
       recipientIds: targetTask.assignee_ids || [],
       title: isApproved ? '¡Tarea Aprobada por el Líder!' : 'Tarea devuelta para correcciones',
       message: isApproved
-        ? `${currentUser?.full_name} aprobó tu entrega en "${targetTask.title}". ${leader_feedback ? `Comentario: ${leader_feedback}` : ''}`
+        ? `${currentUser?.full_name} aprobó tu entrega en "${targetTask.title}". ${
+            leader_feedback ? `Comentario: ${leader_feedback}` : ''
+          }`
         : `${currentUser?.full_name} devolvió la tarea "${targetTask.title}" para ajustes: ${leader_feedback}`,
       notificationType: isApproved ? 'tarea_aprobada' : 'tarea_devuelta',
       relatedTaskId: taskId,
@@ -939,7 +1095,7 @@ export function ProjectProvider({ children }) {
     commit_or_pr_url = '',
     evidence_url = '',
   }) => {
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data, error } = await supabase
         .from('changelog_entries')
         .insert([
@@ -976,7 +1132,6 @@ export function ProjectProvider({ children }) {
       setChangelog((prev) => [newEntry, ...prev]);
     }
 
-    // Notificar al líder y miembros sobre la nueva novedad registrada
     const recipients = profiles
       .filter((p) => p.id !== currentUser?.id && p.is_active)
       .map((p) => p.id);
@@ -993,8 +1148,14 @@ export function ProjectProvider({ children }) {
   // ---------------------------------------------------------------------------
   // MÓDULO 5: REPOSITORIOS Y RECURSOS
   // ---------------------------------------------------------------------------
-  const addRepositoryResource = async ({ name, description, category, url, branch_or_tag = '' }) => {
-    if (isSupabaseConfigured && supabase && project?.id) {
+  const addRepositoryResource = async ({
+    name,
+    description,
+    category,
+    url,
+    branch_or_tag = '',
+  }) => {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data, error } = await supabase
         .from('repositories_resources')
         .insert([
@@ -1060,7 +1221,7 @@ export function ProjectProvider({ children }) {
       dependencies = '',
     } = activityInput;
 
-    if (isSupabaseConfigured && supabase && project?.id) {
+    if (isSupabaseConfigured && supabase && project?.id && project.id !== 'prj-main-01') {
       const { data, error } = await supabase
         .from('work_plan_activities')
         .insert([
@@ -1135,7 +1296,11 @@ export function ProjectProvider({ children }) {
     if (oldAct) {
       await registerAutomaticChangelog({
         title: `Actualización en Cronograma Gantt: ${updates.name || oldAct.name}`,
-        description: `${currentUser?.full_name} actualizó la actividad "${updates.name || oldAct.name}" (Progreso: ${updates.progress ?? oldAct.progress}%, Fechas: ${updates.start_date || oldAct.start_date} a ${updates.end_date || oldAct.end_date}).`,
+        description: `${currentUser?.full_name} actualizó la actividad "${
+          updates.name || oldAct.name
+        }" (Progreso: ${updates.progress ?? oldAct.progress}%, Fechas: ${
+          updates.start_date || oldAct.start_date
+        } a ${updates.end_date || oldAct.end_date}).`,
         entryType: 'cronograma',
       });
 
@@ -1190,7 +1355,7 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // SEMILLA INICIAL PARA SUPABASE (CUANDO LA BASE DE DATOS ESTÁ RECIÉN CREADA)
+  // INICIALIZACIÓN COMPLETA EN SUPABASE (PROYECTO, CRONOGRAMA Y REPOSITORIOS)
   // ---------------------------------------------------------------------------
   const seedInitialDataToSupabase = async () => {
     if (!isSupabaseConfigured || !supabase || !currentUser) return;
@@ -1210,7 +1375,7 @@ export function ProjectProvider({ children }) {
             start_date: INITIAL_PROJECT.start_date,
             end_date: INITIAL_PROJECT.end_date,
             status: 'en_ejecucion',
-            repository_main_url: INITIAL_PROJECT.repository_main_url,
+            repository_main_url: 'https://github.com/MAET211/seguimiento-proyecto',
             methodology: INITIAL_PROJECT.methodology,
             version: INITIAL_PROJECT.version,
           },
@@ -1226,7 +1391,7 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // CÁLCULO DE MÉTRICAS EN TIEMPO REAL PARA EL DASHBOARD Y MÓDULOS
+  // MÉTRICAS EN TIEMPO REAL
   // ---------------------------------------------------------------------------
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -1240,12 +1405,13 @@ export function ProjectProvider({ children }) {
     (t) => t.status !== 'completada' && t.due_date && t.due_date < todayStr
   ).length;
 
-  // El porcentaje general del proyecto pondera las tareas completadas y el avance real
   const overallProgress =
     totalTasks > 0
       ? Math.round(
-          tasks.reduce((acc, t) => acc + (t.status === 'completada' ? 100 : Number(t.progress || 0)), 0) /
-            totalTasks
+          tasks.reduce(
+            (acc, t) => acc + (t.status === 'completada' ? 100 : Number(t.progress || 0)),
+            0
+          ) / totalTasks
         )
       : 0;
 
@@ -1286,40 +1452,30 @@ export function ProjectProvider({ children }) {
       overallProgress,
       todayStr,
     },
-    // Acciones Auth
     login,
-    registerUserAccount,
     resetPassword,
     logout,
     switchActiveRoleUser,
-    // Acciones Admin / Usuarios
     updateMyProfile,
     adminUpdateUser,
     createInvitationOrUser,
-    // Acciones Proyecto
     updateProjectDetails,
     upsertProjectMemberResponsibility,
-    // Acciones Tareas
     createTask,
     updateTask,
     updateTaskMemberProgress,
     submitTaskForLeaderReview,
     reviewTaskByLeader,
     deleteTask,
-    // Acciones Novedades
     addManualChangelog,
-    // Acciones Repositorios
     addRepositoryResource,
     deleteRepositoryResource,
-    // Acciones Plan de Trabajo y Gantt
     addWorkPlanActivity,
     updateWorkPlanActivity,
     deleteWorkPlanActivity,
-    // Acciones Notificaciones
     markNotificationRead,
     markAllMyNotificationsRead,
     clearNotification,
-    // Semilla Supabase
     seedInitialDataToSupabase,
     refreshData: () => fetchAllSupabaseData(currentUser?.id),
   };

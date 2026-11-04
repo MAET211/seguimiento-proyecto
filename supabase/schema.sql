@@ -2,13 +2,12 @@
 -- PLATAFORMA WEB COLABORATIVA DE GESTIÓN DE PROYECTOS (SUPABASE POSTGRESQL)
 -- =============================================================================
 -- Este script crea todas las tablas, funciones, triggers y políticas RLS
--- necesarias para el funcionamiento completo de la plataforma en Supabase.
+-- necesarias para el funcionamiento completo y seguro de la plataforma en Supabase.
 
--- Habilitar extensión para UUIDs
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- -----------------------------------------------------------------------------
--- 1. TABLA: profiles (Usuarios y roles del sistema)
+-- 1. TABLA: profiles (Usuarios y roles del sistema: admin, lider, integrante)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -25,7 +24,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 );
 
 -- -----------------------------------------------------------------------------
--- 2. TABLA: invitations (Registro controlado e invitaciones por rol)
+-- 2. TABLA: invitations (Registro controlado exclusivamente por Líder / Admin)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.invitations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -34,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.invitations (
     role TEXT NOT NULL DEFAULT 'integrante' CHECK (role IN ('admin', 'lider', 'integrante')),
     specialty TEXT DEFAULT 'Desarrollador',
     invited_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-    status TEXT NOT NULL DEFAULT 'pendiente' CHECK (status IN ('pendiente', 'aceptada', 'cancelada')),
+    status TEXT NOT NULL DEFAULT 'aceptada' CHECK (status IN ('pendiente', 'aceptada', 'cancelada')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -221,20 +220,36 @@ CREATE TABLE IF NOT EXISTS public.notifications (
 );
 
 -- =============================================================================
--- FUNCIONES AUXILIARES Y TRIGGERS DE AUTENTICACIÓN / PERFILES
+-- FUNCIONES DE SEGURIDAD Y TRIGGERS DE AUTENTICACIÓN
 -- =============================================================================
 
--- Función para obtener el rol del usuario autenticado sin recursión en RLS
 CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS TEXT
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
 AS $$
-    SELECT role FROM public.profiles WHERE id = auth.uid();
+    SELECT role FROM public.profiles WHERE id = auth.uid() AND is_active = true;
 $$;
 
--- Trigger para crear automáticamente el perfil cuando un usuario se registra en auth.users
+-- Trigger para auto-confirmar cuentas creadas por el Líder / Admin sin esperar email
+CREATE OR REPLACE FUNCTION public.auto_confirm_new_users()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    NEW.email_confirmed_at := COALESCE(NEW.email_confirmed_at, NOW());
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_auto_confirm ON auth.users;
+CREATE TRIGGER on_auth_user_auto_confirm
+    BEFORE INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.auto_confirm_new_users();
+
+-- Trigger para asignar el rol estrictamente desde la invitación del Líder/Admin
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -244,31 +259,25 @@ AS $$
 DECLARE
     inv_record RECORD;
     assigned_role TEXT := 'integrante';
-    assigned_specialty TEXT := 'Desarrollador de Software';
+    assigned_specialty TEXT := 'Integrante del Equipo';
     assigned_name TEXT;
     total_profiles INT;
 BEGIN
-    -- Verificar si existe invitación previa con rol asignado
     SELECT * INTO inv_record FROM public.invitations WHERE LOWER(email) = LOWER(NEW.email) LIMIT 1;
-
-    -- Si es el primer usuario de toda la plataforma, darle rol de admin automáticamente
     SELECT COUNT(*) INTO total_profiles FROM public.profiles;
 
     IF total_profiles = 0 THEN
-        assigned_role := 'admin';
-        assigned_specialty := 'Administrador General de Plataforma';
+        assigned_role := 'lider';
+        assigned_specialty := 'Líder del Proyecto';
     ELSIF inv_record IS NOT NULL THEN
         assigned_role := inv_record.role;
-        assigned_specialty := COALESCE(inv_record.specialty, 'Integrante de Proyecto');
+        assigned_specialty := COALESCE(inv_record.specialty, 'Integrante del Equipo');
         UPDATE public.invitations SET status = 'aceptada' WHERE id = inv_record.id;
-    ELSIF NEW.raw_user_meta_data->>'role' IS NOT NULL THEN
-        assigned_role := NEW.raw_user_meta_data->>'role';
-        assigned_specialty := COALESCE(NEW.raw_user_meta_data->>'specialty', 'Integrante de Proyecto');
     END IF;
 
     assigned_name := COALESCE(
-        NEW.raw_user_meta_data->>'full_name',
         inv_record.full_name,
+        NEW.raw_user_meta_data->>'full_name',
         SPLIT_PART(NEW.email, '@', 1)
     );
 
@@ -276,7 +285,8 @@ BEGIN
     VALUES (NEW.id, NEW.email, assigned_name, assigned_role, assigned_specialty, true)
     ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email,
-        full_name = COALESCE(public.profiles.full_name, EXCLUDED.full_name);
+        full_name = COALESCE(public.profiles.full_name, EXCLUDED.full_name),
+        role = EXCLUDED.role;
 
     RETURN NEW;
 END;
@@ -303,85 +313,59 @@ ALTER TABLE public.changelog_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.repositories_resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
--- 1. Políticas para profiles
 CREATE POLICY "Perfiles visibles para usuarios autenticados"
-    ON public.profiles FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.profiles FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Usuarios editan su propio perfil o Admin/Lider gestiona perfiles"
-    ON public.profiles FOR UPDATE
-    TO authenticated
+    ON public.profiles FOR UPDATE TO authenticated
     USING (auth.uid() = id OR public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (auth.uid() = id OR public.get_my_role() IN ('admin', 'lider'));
 
-CREATE POLICY "Permitir inserción de perfil propio o por Admin"
-    ON public.profiles FOR INSERT
-    TO authenticated
+CREATE POLICY "Permitir inserción de perfil propio o por Admin/Lider"
+    ON public.profiles FOR INSERT TO authenticated
     WITH CHECK (auth.uid() = id OR public.get_my_role() IN ('admin', 'lider'));
 
--- 2. Políticas para invitations
 CREATE POLICY "Invitaciones visibles para usuarios autenticados"
-    ON public.invitations FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.invitations FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin y Líder gestionan invitaciones"
-    ON public.invitations FOR ALL
-    TO authenticated
+    ON public.invitations FOR ALL TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
--- 3. Políticas para projects
 CREATE POLICY "Proyectos visibles para usuarios autenticados"
-    ON public.projects FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.projects FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin y Líder crean y actualizan proyectos"
-    ON public.projects FOR ALL
-    TO authenticated
+    ON public.projects FOR ALL TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
--- 4. Políticas para project_members
 CREATE POLICY "Miembros de proyecto visibles para todos los autenticados"
-    ON public.project_members FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.project_members FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin y Líder gestionan miembros del proyecto"
-    ON public.project_members FOR ALL
-    TO authenticated
+    ON public.project_members FOR ALL TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
--- 5. Políticas para work_plan_activities
 CREATE POLICY "Plan de trabajo visible para todo el equipo"
-    ON public.work_plan_activities FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.work_plan_activities FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin y Líder gestionan el plan de trabajo"
-    ON public.work_plan_activities FOR ALL
-    TO authenticated
+    ON public.work_plan_activities FOR ALL TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
--- 6. Políticas para tasks
 CREATE POLICY "Tareas visibles para todos los usuarios autenticados"
-    ON public.tasks FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.tasks FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Admin y Líder crean y eliminan tareas"
-    ON public.tasks FOR INSERT
-    TO authenticated
+CREATE POLICY "Admin y Líder crean tareas"
+    ON public.tasks FOR INSERT TO authenticated
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
 CREATE POLICY "Actualización de tareas por Líder, Admin o Integrante asignado"
-    ON public.tasks FOR UPDATE
-    TO authenticated
+    ON public.tasks FOR UPDATE TO authenticated
     USING (
         public.get_my_role() IN ('admin', 'lider')
         OR EXISTS (
@@ -398,93 +382,67 @@ CREATE POLICY "Actualización de tareas por Líder, Admin o Integrante asignado"
     );
 
 CREATE POLICY "Admin y Líder eliminan tareas"
-    ON public.tasks FOR DELETE
-    TO authenticated
+    ON public.tasks FOR DELETE TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'));
 
--- 7. Políticas para task_assignees
 CREATE POLICY "Asignaciones visibles para todos"
-    ON public.task_assignees FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.task_assignees FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin y Líder gestionan asignaciones de tareas"
-    ON public.task_assignees FOR ALL
-    TO authenticated
+    ON public.task_assignees FOR ALL TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider'))
     WITH CHECK (public.get_my_role() IN ('admin', 'lider'));
 
--- 8. Políticas para task_evidences
 CREATE POLICY "Evidencias visibles para todos los autenticados"
-    ON public.task_evidences FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.task_evidences FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Integrantes y líderes registran evidencias"
-    ON public.task_evidences FOR INSERT
-    TO authenticated
+    ON public.task_evidences FOR INSERT TO authenticated
     WITH CHECK (auth.uid() = user_id OR public.get_my_role() IN ('admin', 'lider'));
 
 CREATE POLICY "Autor, Líder o Admin eliminan evidencias"
-    ON public.task_evidences FOR DELETE
-    TO authenticated
+    ON public.task_evidences FOR DELETE TO authenticated
     USING (auth.uid() = user_id OR public.get_my_role() IN ('admin', 'lider'));
 
--- 9. Políticas para changelog_entries (Novedades)
 CREATE POLICY "Novedades visibles para todo el equipo"
-    ON public.changelog_entries FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.changelog_entries FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Cualquier integrante autenticado puede registrar novedades"
-    ON public.changelog_entries FOR INSERT
-    TO authenticated
+    ON public.changelog_entries FOR INSERT TO authenticated
     WITH CHECK (true);
 
-CREATE POLICY "Admin, Líder o Autor actualizan/eliminan novedades"
-    ON public.changelog_entries FOR DELETE
-    TO authenticated
+CREATE POLICY "Admin, Líder o Autor eliminan novedades"
+    ON public.changelog_entries FOR DELETE TO authenticated
     USING (auth.uid() = author_id OR public.get_my_role() IN ('admin', 'lider'));
 
--- 10. Políticas para repositories_resources
 CREATE POLICY "Repositorios y recursos visibles para todo el equipo"
-    ON public.repositories_resources FOR SELECT
-    TO authenticated
-    USING (true);
+    ON public.repositories_resources FOR SELECT TO authenticated USING (true);
 
 CREATE POLICY "Admin, Líder e Integrantes pueden aportar recursos o enlaces"
-    ON public.repositories_resources FOR INSERT
-    TO authenticated
+    ON public.repositories_resources FOR INSERT TO authenticated
     WITH CHECK (true);
 
-CREATE POLICY "Admin y Líder actualizan o eliminan repositorios y recursos"
-    ON public.repositories_resources FOR UPDATE
-    TO authenticated
+CREATE POLICY "Admin y Líder actualizan repositorios y recursos"
+    ON public.repositories_resources FOR UPDATE TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider') OR auth.uid() = created_by);
 
 CREATE POLICY "Admin y Líder eliminan repositorios y recursos"
-    ON public.repositories_resources FOR DELETE
-    TO authenticated
+    ON public.repositories_resources FOR DELETE TO authenticated
     USING (public.get_my_role() IN ('admin', 'lider') OR auth.uid() = created_by);
 
--- 11. Políticas para notifications
 CREATE POLICY "Usuarios leen sus propias notificaciones"
-    ON public.notifications FOR SELECT
-    TO authenticated
+    ON public.notifications FOR SELECT TO authenticated
     USING (auth.uid() = user_id OR public.get_my_role() = 'admin');
 
 CREATE POLICY "Usuarios autenticados generan notificaciones para el equipo"
-    ON public.notifications FOR INSERT
-    TO authenticated
+    ON public.notifications FOR INSERT TO authenticated
     WITH CHECK (true);
 
 CREATE POLICY "Usuarios marcan como leídas sus notificaciones"
-    ON public.notifications FOR UPDATE
-    TO authenticated
+    ON public.notifications FOR UPDATE TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Usuarios eliminan sus notificaciones"
-    ON public.notifications FOR DELETE
-    TO authenticated
+    ON public.notifications FOR DELETE TO authenticated
     USING (auth.uid() = user_id OR public.get_my_role() = 'admin');

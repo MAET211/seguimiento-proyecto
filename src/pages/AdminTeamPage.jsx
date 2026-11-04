@@ -6,11 +6,13 @@ import {
   Shield,
   CheckCircle2,
   XCircle,
-  Edit3,
   Save,
   X,
-  Briefcase,
-  Mail,
+  KeyRound,
+  Lock,
+  ShieldCheck,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { ROLE_CONFIG, getInitials } from '../utils/formatters';
@@ -33,6 +35,7 @@ export default function AdminTeamPage() {
   const [activeTab, setActiveTab] = useState('equipo');
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [editingMemberResp, setEditingMemberResp] = useState(null);
+  const [createdCredentialsToast, setCreatedCredentialsToast] = useState(null);
 
   // Estado para formulario de Configuración General del Proyecto
   const [projName, setProjName] = useState(project?.name || '');
@@ -74,10 +77,10 @@ export default function AdminTeamPage() {
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-            Gestión de Equipo, Roles y Configuración
+            Gestión de Equipo, Cuentas y Seguridad por Rol
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Control de cuentas de usuario, asignación de roles (Admin, Líder, Integrante), responsabilidades y parámetros del proyecto.
+            El Líder y Administrador registran las cuentas de acceso del equipo asignando su rol (Administrador, Líder o Integrante).
           </p>
         </div>
 
@@ -85,13 +88,39 @@ export default function AdminTeamPage() {
           <button
             type="button"
             onClick={() => setInviteModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm shadow-indigo-500/20 shrink-0"
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm shadow-indigo-500/20 shrink-0 cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Registrar / Invitar Integrante</span>
+            <span>Dar de Alta Usuario / Integrante</span>
           </button>
         )}
       </div>
+
+      {/* Confirmación de credenciales recién creadas por el Líder */}
+      {createdCredentialsToast && (
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="font-bold flex items-center gap-1.5 text-sm">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              Cuenta creada exitosamente para {createdCredentialsToast.full_name}
+            </p>
+            <p>
+              Correo: <strong>{createdCredentialsToast.email}</strong> • Contraseña asignada:{' '}
+              <code className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 font-mono font-bold">
+                {createdCredentialsToast.password}
+              </code>{' '}
+              • Rol: <strong className="uppercase">{createdCredentialsToast.role}</strong>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCreatedCredentialsToast(null)}
+            className="px-3 py-1.5 rounded-lg border border-emerald-400 text-xs font-semibold self-end sm:self-center"
+          >
+            Entendido
+          </button>
+        </div>
+      )}
 
       {/* Pestañas de navegación interna */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
@@ -105,7 +134,7 @@ export default function AdminTeamPage() {
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Integrantes, Roles y Responsabilidades ({profiles.length})</span>
+          <span>Cuentas del Equipo, Roles y Responsabilidades ({profiles.length})</span>
         </button>
 
         {isLeaderOrAdmin && (
@@ -133,7 +162,7 @@ export default function AdminTeamPage() {
           }`}
         >
           <Shield className="w-4 h-4" />
-          <span>Matriz de Roles y Seguridad RLS</span>
+          <span>Sistema de Seguridad y Matriz RLS</span>
         </button>
       </div>
 
@@ -145,9 +174,9 @@ export default function AdminTeamPage() {
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   <th className="py-3 pr-4">Usuario y Contacto</th>
-                  <th className="py-3 px-4">Rol y Permisos</th>
-                  <th className="py-3 px-4">Responsabilidad en el Proyecto</th>
-                  <th className="py-3 px-4 text-center">Estado Cuenta</th>
+                  <th className="py-3 px-4">Rol en el Sistema</th>
+                  <th className="py-3 px-4">Responsabilidad Específica</th>
+                  <th className="py-3 px-4 text-center">Estado de Acceso</th>
                   {isLeaderOrAdmin && <th className="py-3 pl-4 text-right">Gestión</th>}
                 </tr>
               </thead>
@@ -184,7 +213,7 @@ export default function AdminTeamPage() {
                           >
                             <option value="admin">Administrador</option>
                             <option value="lider">Líder del Proyecto</option>
-                            <option value="integrante">Integrante</option>
+                            <option value="integrante">Integrante del Equipo</option>
                           </select>
                         ) : (
                           <span
@@ -216,11 +245,11 @@ export default function AdminTeamPage() {
                         >
                           {u.is_active ? (
                             <>
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Activo
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Autorizado
                             </>
                           ) : (
                             <>
-                              <XCircle className="w-3.5 h-3.5" /> Desactivado
+                              <XCircle className="w-3.5 h-3.5" /> Bloqueado
                             </>
                           )}
                         </span>
@@ -242,7 +271,7 @@ export default function AdminTeamPage() {
                             }
                             className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 mr-2"
                           >
-                            Asignar Responsabilidad
+                            Responsabilidad
                           </button>
 
                           {u.id !== currentUser?.id && (
@@ -257,7 +286,7 @@ export default function AdminTeamPage() {
                                   : 'text-emerald-600 hover:bg-emerald-50'
                               }`}
                             >
-                              {u.is_active ? 'Desactivar' : 'Activar'}
+                              {u.is_active ? 'Bloquear Acceso' : 'Habilitar'}
                             </button>
                           )}
                         </td>
@@ -268,33 +297,6 @@ export default function AdminTeamPage() {
               </tbody>
             </table>
           </div>
-
-          {/* Invitaciones pendientes */}
-          {invitations.length > 0 && (
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-                Invitaciones Registradas para Control de Acceso
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {invitations.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <p className="font-bold text-slate-900 dark:text-white">{inv.full_name}</p>
-                      <p className="text-slate-500">
-                        {inv.email} • {inv.specialty}
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                      {inv.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -432,56 +434,100 @@ export default function AdminTeamPage() {
         </div>
       )}
 
-      {/* Pestaña 3: Matriz de Permisos por Rol y Seguridad RLS */}
+      {/* Pestaña 3: Sistema de Seguridad y Matriz de Roles RLS */}
       {activeTab === 'permisos' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-              Rol: Administrador
-            </span>
-            <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
-              <li>• Gestionar usuarios y cuentas del sistema.</li>
-              <li>• Crear, editar y desactivar/activar usuarios.</li>
-              <li>• Asignar roles (Admin, Líder, Integrante) y permisos.</li>
-              <li>• Supervisar el avance de todos los módulos.</li>
-              <li>• Administrar la configuración general y conexión DB.</li>
-            </ul>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              Capas de Seguridad Activas en la Plataforma
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <p className="font-bold text-slate-900 dark:text-white">
+                  1. Registro Cerrado al Público
+                </p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1">
+                  Nadie externo puede registrarse desde el Login. Solo el Líder o Administrador da de alta a los integrantes.
+                </p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <p className="font-bold text-slate-900 dark:text-white">
+                  2. Bloqueo Anti-Fuerza Bruta
+                </p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1">
+                  El sistema bloquea automáticamente los intentos tras 5 fallos consecutivos de contraseña.
+                </p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <p className="font-bold text-slate-900 dark:text-white">
+                  3. Políticas RLS en PostgreSQL
+                </p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1">
+                  La función <code>get_my_role()</code> valida en base de datos cada lectura, creación, edición o borrado.
+                </p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <p className="font-bold text-slate-900 dark:text-white">
+                  4. Revocación Instantánea
+                </p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1">
+                  Si el Líder o Admin bloquea a un usuario (<code>is_active = false</code>), su sesión se cierra y no puede ingresar.
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
-              Rol: Líder del Proyecto
-            </span>
-            <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
-              <li>• Configurar el proyecto y registrar integrantes.</li>
-              <li>• Asignar responsabilidades específicas a cada miembro.</li>
-              <li>• Delegar tareas individuales o grupales con fechas y prioridades.</li>
-              <li>• Crear y reprogramar el Plan de Trabajo (Diagrama de Gantt).</li>
-              <li>• Revisar, aprobar o devolver tareas enviadas a revisión.</li>
-            </ul>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                Rol 1: Administrador
+              </span>
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
+                <li>• Gestionar usuarios y cuentas del sistema.</li>
+                <li>• Crear, editar y bloquear/habilitar usuarios.</li>
+                <li>• Asignar roles (Admin, Líder, Integrante) y permisos.</li>
+                <li>• Supervisar el avance de todos los módulos.</li>
+                <li>• Administrar la configuración general y conexión DB.</li>
+              </ul>
+            </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-              Rol: Integrante
-            </span>
-            <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
-              <li>• Iniciar sesión con su propia cuenta personal.</li>
-              <li>• Consultar tareas asignadas, instrucciones y prioridades.</li>
-              <li>• Actualizar el progreso porcentual de sus actividades.</li>
-              <li>• Registrar novedades, commits, PRs y adjuntar evidencias.</li>
-              <li>• Marcar tareas como finalizadas para revisión del líder.</li>
-            </ul>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                Rol 2: Líder del Proyecto
+              </span>
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
+                <li>• Dar de alta a los integrantes del proyecto con su rol y clave.</li>
+                <li>• Asignar responsabilidades específicas a cada miembro.</li>
+                <li>• Delegar tareas individuales o grupales con fechas y prioridades.</li>
+                <li>• Crear y reprogramar el Plan de Trabajo (Diagrama de Gantt).</li>
+                <li>• Revisar, aprobar o devolver tareas enviadas a revisión.</li>
+              </ul>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                Rol 3: Equipo / Integrantes
+              </span>
+              <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pt-2">
+                <li>• Iniciar sesión con la cuenta y contraseña asignada por el Líder.</li>
+                <li>• Consultar tareas asignadas, instrucciones y prioridades.</li>
+                <li>• Actualizar el progreso porcentual de sus actividades.</li>
+                <li>• Registrar novedades, commits, PRs y adjuntar evidencias.</li>
+                <li>• Marcar tareas como finalizadas para revisión del líder.</li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Registrar / Invitar Nuevo Usuario */}
+      {/* Modal: Dar de Alta Nuevo Usuario con Correo, Contraseña y Rol Designado */}
       {inviteModalOpen && (
         <InviteUserModal
           onClose={() => setInviteModalOpen(false)}
           onSave={async (payload) => {
             await createInvitationOrUser(payload);
+            setCreatedCredentialsToast(payload);
             setInviteModalOpen(false);
           }}
         />
@@ -505,24 +551,44 @@ export default function AdminTeamPage() {
 function InviteUserModal({ onClose, onSave }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('Equipo2026*');
   const [role, setRole] = useState('integrante');
   const [specialty, setSpecialty] = useState('Desarrollador de Software');
   const [responsibilities, setResponsibilities] = useState(
-    'Desarrollo de módulos asignados, pruebas unitarias y registro de avances.'
+    'Desarrollo de módulos asignados, pruebas y registro de avances.'
   );
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const generateStrongPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$*';
+    let pass = 'Nxs';
+    for (let i = 0; i < 7; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    pass += '9*';
+    setPassword(pass);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrorMsg('');
+    if (password.length < 6) {
+      setErrorMsg('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
     setSaving(true);
     try {
       await onSave({
-        full_name: fullName,
-        email,
+        full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        password,
         role,
-        specialty,
-        responsibilities,
+        specialty: specialty.trim(),
+        responsibilities: responsibilities.trim(),
       });
+    } catch (err) {
+      setErrorMsg(err.message || 'Error al registrar la cuenta en Supabase.');
     } finally {
       setSaving(false);
     }
@@ -531,19 +597,30 @@ function InviteUserModal({ onClose, onSave }) {
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">
-            Registrar / Invitar Nuevo Integrante
-          </h3>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Dar de Alta Usuario del Proyecto
+            </h3>
+            <p className="text-xs text-slate-500">
+              Crea su cuenta de acceso y asígnale su rol oficial.
+            </p>
+          </div>
           <button onClick={onClose} className="p-1 text-slate-400">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {errorMsg && (
+          <div className="mb-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs">
+            {errorMsg}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Nombre Completo *
+              Nombre Completo de la Persona *
             </label>
             <input
               type="text"
@@ -557,29 +634,56 @@ function InviteUserModal({ onClose, onSave }) {
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Correo Electrónico *
+              Correo Electrónico (Usuario de Login) *
             </label>
             <input
               type="email"
               required
-              placeholder="andres@nexuspm.dev"
+              placeholder="integrante@correo.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
             />
           </div>
 
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Contraseña Inicial Asignada *
+              </label>
+              <button
+                type="button"
+                onClick={generateStrongPassword}
+                className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+              >
+                <KeyRound className="w-3 h-3" />
+                Generar clave segura
+              </button>
+            </div>
+            <input
+              type="text"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Comparte este correo y contraseña con el integrante para que inicie sesión.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Rol del Sistema *
+                Rol Designado *
               </label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-semibold"
               >
-                <option value="integrante">Integrante</option>
+                <option value="integrante">Equipo / Integrante</option>
                 <option value="lider">Líder del Proyecto</option>
                 <option value="admin">Administrador</option>
               </select>
@@ -623,7 +727,7 @@ function InviteUserModal({ onClose, onSave }) {
               disabled={saving}
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {saving ? 'Registrando...' : 'Registrar Usuario'}
+              {saving ? 'Creando Cuenta...' : 'Crear Cuenta y Asignar Rol'}
             </button>
           </div>
         </form>
