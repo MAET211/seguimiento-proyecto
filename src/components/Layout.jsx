@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   CheckSquare,
@@ -20,8 +20,13 @@ import {
   Sparkles,
   ExternalLink,
   GraduationCap,
+  Award,
+  FileText,
+  TrendingUp,
+  ArrowLeft,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
+import { usePersonalStudy } from '../context/PersonalStudyContext';
 import { ROLE_CONFIG, formatDateTime, getInitials } from '../utils/formatters';
 import {
   supabaseUrl,
@@ -48,6 +53,17 @@ export default function Layout() {
   } = useProject();
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const {
+    hasStudyAccess,
+    hasSigmaAccess,
+    isNexusAdmin,
+    myStudyRole,
+    metrics: studyMetrics,
+  } = usePersonalStudy();
+
+  const isStudyEnv = location.pathname.startsWith('/estudio-personal');
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
@@ -60,6 +76,7 @@ export default function Layout() {
 
   const roleBadge = ROLE_CONFIG[currentUser?.role || 'integrante'];
 
+  // Navegación para el entorno del proyecto SIGMA
   const navItems = [
     {
       to: '/',
@@ -108,6 +125,41 @@ export default function Layout() {
     },
   ];
 
+  // Navegación exclusiva para el entorno de Estudio Personal
+  const studyNavItems = [
+    {
+      to: '/estudio-personal',
+      label: 'Panel de Estudio',
+      icon: LayoutDashboard,
+      end: true,
+    },
+    {
+      to: '/estudio-personal/cronograma',
+      label: 'Cronograma Académico',
+      icon: CalendarRange,
+    },
+    {
+      to: '/estudio-personal/avances',
+      label: 'Avances Diarios',
+      icon: Award,
+    },
+    {
+      to: '/estudio-personal/documentos',
+      label: 'Documentación y Recursos',
+      icon: FileText,
+    },
+    {
+      to: '/estudio-personal/colaboradores',
+      label: 'Colaboradores y Permisos',
+      icon: Users,
+    },
+    {
+      to: '/estudio-personal/seguimiento',
+      label: 'Seguimiento del Aprendizaje',
+      icon: TrendingUp,
+    },
+  ];
+
   const handleConnectRuntimeSupabase = (e) => {
     e.preventDefault();
     if (!inputUrl.startsWith('https://') || inputAnonKey.length < 20) return;
@@ -142,18 +194,24 @@ export default function Layout() {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Cabecera de marca */}
+        {/* Cabecera de marca conmutada según entorno */}
         <div className="h-16 px-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold shadow-sm shadow-indigo-500/30">
-              NP
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold shadow-sm transition-all ${
+                isStudyEnv
+                  ? 'bg-gradient-to-br from-purple-600 to-indigo-600 shadow-purple-500/30'
+                  : 'bg-gradient-to-br from-indigo-600 to-violet-600 shadow-indigo-500/30'
+              }`}
+            >
+              {isStudyEnv ? <GraduationCap className="w-5 h-5 text-white" /> : 'NP'}
             </div>
             <div>
               <span className="font-bold text-base tracking-tight text-slate-900 dark:text-white block leading-none">
-                NexusPM
+                {isStudyEnv ? 'Estudio Personal' : 'NexusPM'}
               </span>
               <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                Gestión Colaborativa
+                {isStudyEnv ? 'Espacio Académico Privado' : 'Gestión Colaborativa — SIGMA'}
               </span>
             </div>
           </div>
@@ -165,10 +223,32 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Tarjeta resumida del usuario activo y rol */}
+        {/* Botón rápido para alternar a SIGMA cuando se navega dentro de Estudio Personal */}
+        {isStudyEnv && hasSigmaAccess && (
+          <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-purple-50/40 dark:bg-purple-950/20">
+            <button
+              onClick={() => {
+                setSidebarOpen(false);
+                navigate('/');
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-purple-700 dark:text-purple-300 bg-white dark:bg-slate-900 hover:bg-purple-100 dark:hover:bg-purple-900/40 border border-purple-200 dark:border-purple-800/80 transition-all shadow-xs"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Volver a Proyecto SIGMA</span>
+            </button>
+          </div>
+        )}
+
+        {/* Tarjeta resumida del usuario activo y rol en el entorno correspondiente */}
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-600/10 dark:bg-indigo-500/20 border border-indigo-500/30 text-indigo-700 dark:text-indigo-300 font-bold text-sm flex items-center justify-center shrink-0">
+            <div
+              className={`w-10 h-10 rounded-full border font-bold text-sm flex items-center justify-center shrink-0 ${
+                isStudyEnv
+                  ? 'bg-purple-600/10 dark:bg-purple-500/20 border-purple-500/30 text-purple-700 dark:text-purple-300'
+                  : 'bg-indigo-600/10 dark:bg-indigo-500/20 border-indigo-500/30 text-indigo-700 dark:text-indigo-300'
+              }`}
+            >
               {getInitials(currentUser?.full_name)}
             </div>
             <div className="min-w-0 flex-1">
@@ -181,12 +261,25 @@ export default function Layout() {
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roleBadge.badgeClass}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${roleBadge.dotClass}`} />
-              {roleBadge.label}
-            </span>
+            {isStudyEnv ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border bg-purple-100/70 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-600 dark:bg-purple-400" />
+                {isNexusAdmin
+                  ? 'Admin General'
+                  : myStudyRole === 'admin'
+                  ? 'Administrador'
+                  : myStudyRole === 'editor'
+                  ? 'Editor'
+                  : 'Lector'}
+              </span>
+            ) : (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roleBadge.badgeClass}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${roleBadge.dotClass}`} />
+                {roleBadge.label}
+              </span>
+            )}
             <button
               onClick={() => setProfileModalOpen(true)}
               className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
@@ -196,74 +289,101 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Enlaces de navegación principal */}
+        {/* Enlaces de navegación principal (aislados por entorno) */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-            Módulos del Proyecto
+            {isStudyEnv ? 'Módulos de Estudio' : 'Módulos del Proyecto'}
           </p>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{item.label}</span>
-                </div>
-                {item.badge !== undefined && (
-                  <span
-                    className={`px-2 py-0.5 text-[11px] rounded-full font-semibold ${
-                      item.badgeHighlight
-                        ? 'bg-amber-400 text-slate-950 animate-pulse'
-                        : 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </NavLink>
-            );
-          })}
 
-          {/* Sección y Enlace al Espacio Independiente de Estudio Personal */}
-          <div className="pt-3 mt-2 border-t border-slate-200/80 dark:border-slate-800">
-            <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center justify-between">
-              <span>Espacio Académico</span>
-              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                Privado
-              </span>
-            </div>
-            <NavLink
-              to="/estudio-personal"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all mt-1 ${
-                  isActive
-                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm shadow-purple-600/25'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-purple-50/50 dark:hover:bg-purple-950/30'
-                }`
-              }
-            >
-              <div className="flex items-center gap-3">
-                <GraduationCap className="w-4 h-4 shrink-0 text-purple-600 dark:text-purple-400" />
-                <span>Estudio Personal</span>
-              </div>
-              <span className="px-1.5 py-0.5 text-[10px] rounded-md font-bold bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                Entorno 2
-              </span>
-            </NavLink>
-          </div>
+          {/* Si está en Estudio Personal, solo muestra la navegación de Estudio Personal */}
+          {isStudyEnv ? (
+            studyNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/25'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-purple-50/60 dark:hover:bg-purple-950/40'
+                    }`
+                  }
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span>{item.label}</span>
+                  </div>
+                </NavLink>
+              );
+            })
+          ) : (
+            // Si está en SIGMA, muestra los 6 módulos de SIGMA intactos
+            <>
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    onClick={() => setSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                        isActive
+                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                      }`
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge !== undefined && (
+                      <span
+                        className={`px-2 py-0.5 text-[11px] rounded-full font-semibold ${
+                          item.badgeHighlight
+                            ? 'bg-amber-400 text-slate-950 animate-pulse'
+                            : 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </NavLink>
+                );
+              })}
+
+              {/* ENLACE A ESTUDIO PERSONAL: ÚNICA Y EXCLUSIVAMENTE SI EL USUARIO TIENE ACCESO AUTORIZADO */}
+              {hasStudyAccess && (
+                <div className="pt-3 mt-2 border-t border-slate-200/80 dark:border-slate-800">
+                  <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center justify-between">
+                    <span>Espacio Académico</span>
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                      Privado
+                    </span>
+                  </div>
+                  <NavLink
+                    to="/estudio-personal"
+                    onClick={() => setSidebarOpen(false)}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all mt-1 bg-purple-50/70 dark:bg-purple-950/30 hover:bg-purple-100/70 dark:hover:bg-purple-900/40 text-purple-800 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/60 group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <GraduationCap className="w-4 h-4 shrink-0 text-purple-600 dark:text-purple-400 group-hover:scale-110 transition-transform" />
+                      <span className="font-semibold">Estudio Personal</span>
+                    </div>
+                    <span className="px-1.5 py-0.5 text-[10px] rounded font-bold bg-purple-600 text-white">
+                      Entrar →
+                    </span>
+                  </NavLink>
+                </div>
+              )}
+            </>
+          )}
         </nav>
 
         {/* Estado de conexión a Supabase y botón de configuración */}
@@ -347,19 +467,29 @@ export default function Layout() {
 
           {/* Controles derechos: Progreso global rápido, Notificaciones, Modo Oscuro */}
           <div className="flex items-center gap-2.5">
-            {/* Indicador compacto de avance del proyecto */}
+            {/* Indicador compacto de avance conmutado por entorno */}
             <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                Avance global:
+                {isStudyEnv ? 'Progreso académico:' : 'Avance global:'}
               </span>
               <div className="w-20 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all duration-300"
-                  style={{ width: `${metrics.overallProgress}%` }}
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    isStudyEnv ? 'bg-purple-600 dark:bg-purple-500' : 'bg-indigo-600 dark:bg-indigo-500'
+                  }`}
+                  style={{
+                    width: `${isStudyEnv ? studyMetrics.overallProgress : metrics.overallProgress}%`,
+                  }}
                 />
               </div>
-              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                {metrics.overallProgress}%
+              <span
+                className={`text-xs font-bold ${
+                  isStudyEnv
+                    ? 'text-purple-600 dark:text-purple-400'
+                    : 'text-indigo-600 dark:text-indigo-400'
+                }`}
+              >
+                {isStudyEnv ? studyMetrics.overallProgress : metrics.overallProgress}%
               </span>
             </div>
 

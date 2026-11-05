@@ -19,38 +19,36 @@ export const usePersonalStudy = () => {
 export function PersonalStudyProvider({ children }) {
   const { currentUser } = useProject();
 
-  const storageKey = useMemo(() => {
-    return `NEXUS_STUDY_DATA_V2_${currentUser?.id || 'guest'}`;
-  }, [currentUser?.id]);
+  const storageKey = 'NEXUS_STUDY_DATA_V3';
 
-  // Estado del espacio de estudio
+  // Estado del espacio de estudio (El propietario legítimo inicial es el Administrador General)
   const [activeSpace, setActiveSpace] = useState(() => {
     try {
-      const saved = localStorage.getItem(`NEXUS_STUDY_SPACE_${currentUser?.id || 'guest'}`);
+      const saved = localStorage.getItem('NEXUS_STUDY_SPACE_V3');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
     return {
       ...INITIAL_STUDY_SPACE,
-      owner_id: currentUser?.id || 'owner-main',
-      owner_name: currentUser?.full_name || 'Propietario Principal',
-      owner_email: currentUser?.email || 'admin@nexuspm.com',
+      owner_id: 'usr-admin-01',
+      owner_name: 'Carlos Mendoza (Admin)',
+      owner_email: 'admin@nexuspm.dev',
     };
   });
 
-  // Lista de miembros autorizados (por defecto solo el propietario es Administrador)
+  // Lista de miembros autorizados (por defecto solo el Administrador General)
   const [members, setMembers] = useState(() => {
     try {
-      const saved = localStorage.getItem(`NEXUS_STUDY_MEMBERS_${currentUser?.id || 'guest'}`);
+      const saved = localStorage.getItem('NEXUS_STUDY_MEMBERS_V3');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
     return [
       {
-        id: `mem-${currentUser?.id || 'owner'}`,
-        user_id: currentUser?.id || 'owner-main',
-        email: currentUser?.email || 'propietario@nexuspm.com',
-        full_name: currentUser?.full_name || 'Propietario Principal',
+        id: 'mem-admin-01',
+        user_id: 'usr-admin-01',
+        email: 'admin@nexuspm.dev',
+        full_name: 'Carlos Mendoza (Admin)',
         role: 'admin', // 'admin' | 'editor' | 'lector'
-        joined_at: new Date().toISOString(),
+        joined_at: '2026-11-01T00:00:00.000Z',
         is_owner: true,
       },
     ];
@@ -85,15 +83,14 @@ export function PersonalStudyProvider({ children }) {
 
   // Sincronización en LocalStorage para garantizar disponibilidad continua
   useEffect(() => {
-    if (!currentUser?.id) return;
     try {
-      localStorage.setItem(`NEXUS_STUDY_SPACE_${currentUser.id}`, JSON.stringify(activeSpace));
-      localStorage.setItem(`NEXUS_STUDY_MEMBERS_${currentUser.id}`, JSON.stringify(members));
+      localStorage.setItem('NEXUS_STUDY_SPACE_V3', JSON.stringify(activeSpace));
+      localStorage.setItem('NEXUS_STUDY_MEMBERS_V3', JSON.stringify(members));
       localStorage.setItem(`${storageKey}_ACTIVITIES`, JSON.stringify(activities));
       localStorage.setItem(`${storageKey}_ADVANCES`, JSON.stringify(advances));
       localStorage.setItem(`${storageKey}_DOCUMENTS`, JSON.stringify(documents));
     } catch (_) {}
-  }, [activeSpace, members, activities, advances, documents, currentUser?.id, storageKey]);
+  }, [activeSpace, members, activities, advances, documents, storageKey]);
 
   // Intentar cargar o sincronizar con Supabase si las tablas existen
   useEffect(() => {
@@ -137,36 +134,46 @@ export function PersonalStudyProvider({ children }) {
   }, [currentUser?.id]);
 
   // ---------------------------------------------------------------------------
-  // CONTROL DE ACCESO Y PERMISOS ESTRICTOS
+  // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
   // ---------------------------------------------------------------------------
-  const isStudyOwner = useMemo(() => {
-    if (!currentUser) return false;
-    // Es propietario si coincide su ID con el owner_id o si es el usuario creador principal
-    return activeSpace.owner_id === currentUser.id || activeSpace.owner_email === currentUser.email;
-  }, [activeSpace, currentUser]);
+  // 1. Administrador General de NexusPM (único con acceso global verificado por backend/profiles)
+  const isNexusAdmin = currentUser?.role === 'admin';
 
+  // 2. Membresía explícita en el espacio de estudio
   const currentMember = useMemo(() => {
     if (!currentUser) return null;
     return (
       members.find(
         (m) =>
-          m.user_id === currentUser.id ||
-          (m.email && m.email.toLowerCase() === currentUser.email?.toLowerCase())
+          (m.user_id && m.user_id === currentUser.id) ||
+          (m.email && currentUser.email && m.email.toLowerCase() === currentUser.email.toLowerCase())
       ) || null
     );
   }, [members, currentUser]);
 
+  // Es propietario si es el Administrador General o el dueño legítimo registrado
+  const isStudyOwner = Boolean(
+    isNexusAdmin || (currentUser?.id && activeSpace.owner_id === currentUser.id && currentUser.role === 'admin')
+  );
+
+  // Rol específico dentro del espacio de estudio
   const myStudyRole = useMemo(() => {
-    if (isStudyOwner) return 'admin';
-    return currentMember ? currentMember.role : null;
-  }, [isStudyOwner, currentMember]);
+    if (isNexusAdmin) return 'admin';
+    if (currentMember) return currentMember.role;
+    return null;
+  }, [isNexusAdmin, currentMember]);
 
-  // Si no es el propietario ni un miembro autorizado explícitamente, no tiene acceso
-  const hasStudyAccess = Boolean(isStudyOwner || currentMember);
+  // Si no es el Administrador General de NexusPM ni un miembro autorizado por invitación, NO TIENE ACCESO
+  const hasStudyAccess = Boolean(isNexusAdmin || currentMember);
 
-  const canManageMembers = isStudyOwner || myStudyRole === 'admin';
-  const canEditStudy = isStudyOwner || myStudyRole === 'admin' || myStudyRole === 'editor';
-  const isReadOnly = myStudyRole === 'lector' && !isStudyOwner;
+  // Acceso al entorno SIGMA (proyecto principal)
+  const hasSigmaAccess = Boolean(
+    isNexusAdmin || currentUser?.role === 'lider' || currentUser?.role === 'integrante'
+  );
+
+  const canManageMembers = isNexusAdmin || myStudyRole === 'admin';
+  const canEditStudy = isNexusAdmin || myStudyRole === 'admin' || myStudyRole === 'editor';
+  const isReadOnly = myStudyRole === 'lector' && !isNexusAdmin;
 
   // ---------------------------------------------------------------------------
   // INDICADORES DINÁMICOS EXCLUSIVOS DEL DASHBOARD DE ESTUDIO
@@ -581,9 +588,11 @@ export function PersonalStudyProvider({ children }) {
     documents,
     metrics,
     // Permisos y estados
+    isNexusAdmin,
     isStudyOwner,
     myStudyRole,
     hasStudyAccess,
+    hasSigmaAccess,
     canManageMembers,
     canEditStudy,
     isReadOnly,

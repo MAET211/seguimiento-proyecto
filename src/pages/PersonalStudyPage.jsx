@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   GraduationCap,
   LayoutDashboard,
@@ -13,10 +13,8 @@ import {
   ArrowLeft,
   BookOpen,
 } from 'lucide-react';
-import {
-  PersonalStudyProvider,
-  usePersonalStudy,
-} from '../context/PersonalStudyContext';
+import { usePersonalStudy } from '../context/PersonalStudyContext';
+import { useProject } from '../context/ProjectContext';
 import StudyDashboardTab from '../components/study/StudyDashboardTab';
 import StudyScheduleTab from '../components/study/StudyScheduleTab';
 import StudyAdvancesTab from '../components/study/StudyAdvancesTab';
@@ -24,12 +22,25 @@ import StudyDocumentsTab from '../components/study/StudyDocumentsTab';
 import StudyCollaboratorsTab from '../components/study/StudyCollaboratorsTab';
 import StudyLearningTrackingTab from '../components/study/StudyLearningTrackingTab';
 
-function PersonalStudyInner() {
+export default function PersonalStudyPage({ initialTab = 'dashboard' }) {
   const navigate = useNavigate();
-  const { hasStudyAccess, activeSpace, myStudyRole, isStudyOwner } =
-    usePersonalStudy();
+  const location = useLocation();
+  const { currentUser } = useProject();
+  const {
+    hasStudyAccess,
+    activeSpace,
+    myStudyRole,
+    isStudyOwner,
+    isNexusAdmin,
+  } = usePersonalStudy();
 
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Si el usuario no tiene acceso (integrante de SIGMA sin invitación)
   if (!hasStudyAccess) {
@@ -70,35 +81,48 @@ function PersonalStudyInner() {
   const tabs = [
     {
       id: 'dashboard',
+      path: '/estudio-personal',
       label: 'Panel de Estudio',
       icon: LayoutDashboard,
     },
     {
       id: 'cronograma',
+      path: '/estudio-personal/cronograma',
       label: 'Cronograma Académico',
       icon: CalendarRange,
     },
     {
       id: 'avances',
+      path: '/estudio-personal/avances',
       label: 'Avances Diarios',
       icon: Award,
     },
     {
       id: 'documentos',
+      path: '/estudio-personal/documentos',
       label: 'Documentación y Recursos',
       icon: FileText,
     },
     {
       id: 'colaboradores',
+      path: '/estudio-personal/colaboradores',
       label: 'Colaboradores y Permisos',
       icon: Users,
     },
     {
       id: 'seguimiento',
+      path: '/estudio-personal/seguimiento',
       label: 'Seguimiento del Aprendizaje',
       icon: TrendingUp,
     },
   ];
+
+  const handleTabClick = (tab) => {
+    setActiveTab(tab.id);
+    navigate(tab.path);
+  };
+
+  const hasSigmaAccess = isNexusAdmin || currentUser?.role === 'lider' || currentUser?.role === 'integrante';
 
   return (
     <div className="space-y-6">
@@ -117,7 +141,7 @@ function PersonalStudyInner() {
                 Privado
               </span>
               <span className="text-xs font-semibold text-slate-400">
-                • Rol: {isStudyOwner ? 'Propietario' : myStudyRole?.toUpperCase()}
+                • Rol: {isNexusAdmin ? 'Administrador General' : isStudyOwner ? 'Propietario' : myStudyRole?.toUpperCase()}
               </span>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -126,13 +150,15 @@ function PersonalStudyInner() {
           </div>
         </div>
 
-        <button
-          onClick={() => navigate('/')}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Volver al Proyecto SIGMA</span>
-        </button>
+        {hasSigmaAccess && (
+          <button
+            onClick={() => navigate('/')}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Volver al Proyecto SIGMA</span>
+          </button>
+        )}
       </div>
 
       {/* Navegación por Pestañas del Módulo Estudio Personal */}
@@ -145,7 +171,7 @@ function PersonalStudyInner() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabClick(tab)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                   isActive
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
@@ -162,7 +188,12 @@ function PersonalStudyInner() {
 
       {/* Renderizado de la Vista Activa */}
       {activeTab === 'dashboard' && (
-        <StudyDashboardTab onNavigateTab={(tabKey) => setActiveTab(tabKey)} />
+        <StudyDashboardTab
+          onNavigateTab={(tabKey) => {
+            const targetTab = tabs.find((t) => t.id === tabKey);
+            if (targetTab) handleTabClick(targetTab);
+          }}
+        />
       )}
       {activeTab === 'cronograma' && <StudyScheduleTab />}
       {activeTab === 'avances' && <StudyAdvancesTab />}
@@ -170,13 +201,5 @@ function PersonalStudyInner() {
       {activeTab === 'colaboradores' && <StudyCollaboratorsTab />}
       {activeTab === 'seguimiento' && <StudyLearningTrackingTab />}
     </div>
-  );
-}
-
-export default function PersonalStudyPage() {
-  return (
-    <PersonalStudyProvider>
-      <PersonalStudyInner />
-    </PersonalStudyProvider>
   );
 }

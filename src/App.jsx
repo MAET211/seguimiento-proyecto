@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ProjectProvider, useProject } from './context/ProjectContext';
+import { PersonalStudyProvider, usePersonalStudy } from './context/PersonalStudyContext';
 import Layout from './components/Layout';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
@@ -91,39 +92,160 @@ function PublicOnlyRoute({ children }) {
   return children;
 }
 
+/**
+ * Guardia de ruta para el entorno SIGMA:
+ * - Si el usuario es un participante exclusivo de Estudio Personal y no pertenece a SIGMA,
+ *   lo redirige automáticamente a su entorno de estudio.
+ */
+function SigmaRouteGuard({ children }) {
+  const { hasSigmaAccess, isNexusAdmin } = usePersonalStudy();
+  if (!isNexusAdmin && !hasSigmaAccess) {
+    return <Navigate to="/estudio-personal" replace />;
+  }
+  return children;
+}
+
+/**
+ * Guardia de ruta para el entorno de Estudio Personal:
+ * - Si el usuario es un integrante de SIGMA sin invitación o autorización expresa,
+ *   lo bloquea y redirige a la raíz de SIGMA.
+ */
+function StudyRouteGuard({ children }) {
+  const { hasStudyAccess } = usePersonalStudy();
+  if (!hasStudyAccess) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   return (
     <ProjectProvider>
-      <HashRouter>
-        <NavigationSecurityGuard />
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <PublicOnlyRoute>
-                <AuthPage />
-              </PublicOnlyRoute>
-            }
-          />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<DashboardPage />} />
-            <Route path="tareas" element={<TasksPage />} />
-            <Route path="plan-trabajo" element={<WorkPlanPage />} />
-            <Route path="novedades" element={<ChangelogPage />} />
-            <Route path="repositorios" element={<RepositoriesPage />} />
-            <Route path="administracion" element={<AdminTeamPage />} />
-            <Route path="estudio-personal" element={<PersonalStudyPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+      <PersonalStudyProvider>
+        <HashRouter>
+          <NavigationSecurityGuard />
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <PublicOnlyRoute>
+                  <AuthPage />
+                </PublicOnlyRoute>
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              {/* Rutas exclusivas del Entorno SIGMA (Proyecto Principal) */}
+              <Route
+                index
+                element={
+                  <SigmaRouteGuard>
+                    <DashboardPage />
+                  </SigmaRouteGuard>
+                }
+              />
+              <Route
+                path="tareas"
+                element={
+                  <SigmaRouteGuard>
+                    <TasksPage />
+                  </SigmaRouteGuard>
+                }
+              />
+              <Route
+                path="plan-trabajo"
+                element={
+                  <SigmaRouteGuard>
+                    <WorkPlanPage />
+                  </SigmaRouteGuard>
+                }
+              />
+              <Route
+                path="novedades"
+                element={
+                  <SigmaRouteGuard>
+                    <ChangelogPage />
+                  </SigmaRouteGuard>
+                }
+              />
+              <Route
+                path="repositorios"
+                element={
+                  <SigmaRouteGuard>
+                    <RepositoriesPage />
+                  </SigmaRouteGuard>
+                }
+              />
+              <Route
+                path="administracion"
+                element={
+                  <SigmaRouteGuard>
+                    <AdminTeamPage />
+                  </SigmaRouteGuard>
+                }
+              />
+
+              {/* Rutas exclusivas del Entorno Estudio Personal (Entorno 2 Desacoplado) */}
+              <Route
+                path="estudio-personal"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="dashboard" />
+                  </StudyRouteGuard>
+                }
+              />
+              <Route
+                path="estudio-personal/cronograma"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="cronograma" />
+                  </StudyRouteGuard>
+                }
+              />
+              <Route
+                path="estudio-personal/avances"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="avances" />
+                  </StudyRouteGuard>
+                }
+              />
+              <Route
+                path="estudio-personal/documentos"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="documentos" />
+                  </StudyRouteGuard>
+                }
+              />
+              <Route
+                path="estudio-personal/colaboradores"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="colaboradores" />
+                  </StudyRouteGuard>
+                }
+              />
+              <Route
+                path="estudio-personal/seguimiento"
+                element={
+                  <StudyRouteGuard>
+                    <PersonalStudyPage initialTab="seguimiento" />
+                  </StudyRouteGuard>
+                }
+              />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </HashRouter>
+      </PersonalStudyProvider>
     </ProjectProvider>
   );
 }
