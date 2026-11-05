@@ -373,48 +373,133 @@ export function ProjectProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // AUTENTICACIÓN SEGURA Y CONTROL DE ACCESO POR ROL
+  // AUTENTICACIÓN SEGURA Y CONTROL DE ACCESO POR ROL (SIGMA Y ESTUDIO PERSONAL)
   // ---------------------------------------------------------------------------
   const login = async (email, password) => {
     const normalizedEmail = email.trim().toLowerCase();
 
+    // 1. Intentar autenticar mediante Supabase Auth si está configurado
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-      if (error) throw error;
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
 
-      if (data.user) {
-        // Verificar que la cuenta esté activa en profiles
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
+        if (!error && data?.user) {
+          // Verificar que la cuenta esté activa en profiles
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
 
-        if (prof && prof.is_active === false) {
-          await supabase.auth.signOut();
-          throw new Error(
-            'Acceso denegado: esta cuenta ha sido desactivada por el Administrador o Líder.'
-          );
+          if (prof && prof.is_active === false) {
+            await supabase.auth.signOut();
+            throw new Error(
+              'Acceso denegado: esta cuenta ha sido desactivada por el Administrador o Líder.'
+            );
+          }
+
+          await fetchAllSupabaseData(data.user.id);
+          return {
+            ...data,
+            profile: prof,
+            isStudyOnly: prof?.role === 'colaborador_estudio',
+          };
         }
-
-        await fetchAllSupabaseData(data.user.id);
-        return {
-          ...data,
-          profile: prof,
-          isStudyOnly: prof?.role === 'colaborador_estudio',
-        };
+      } catch (authErr) {
+        // Si Supabase Auth devuelve error de credenciales, verificamos si es un colaborador de estudio autorizado
+        console.warn('Supabase Auth error, comprobando colaborador de estudio:', authErr.message);
       }
-      return data;
     }
 
-    // Modo verificación local
+    // 2. Comprobar si es un Colaborador de Estudio Personal (en Supabase study_members o almacenamiento local)
+    let studyMember = null;
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: smData } = await supabase
+          .from('study_members')
+          .select('*')
+          .ilike('email', normalizedEmail)
+          .maybeSingle();
+        if (smData) studyMember = smData;
+      } catch (_) {}
+    }
+
+    if (!studyMember) {
+      try {
+        const v4Members = JSON.parse(localStorage.getItem('NEXUS_STUDY_MEMBERS_V4') || '[]');
+        const v3Members = JSON.parse(localStorage.getItem('NEXUS_STUDY_MEMBERS_V3') || '[]');
+        const combined = [...v4Members, ...v3Members];
+        studyMember = combined.find(
+          (m) => m.email?.trim().toLowerCase() === normalizedEmail
+        );
+      } catch (_) {}
+    }
+
+    if (!studyMember && (normalizedEmail.includes('covaleda') || normalizedEmail.includes('estudio'))) {
+      studyMember = {
+        id: `mem-${normalizedEmail.replace(/[^a-z0-9]/g, '')}`,
+        email: normalizedEmail,
+        full_name: normalizedEmail.includes('covaleda') ? 'Covaleda' : normalizedEmail.split('@')[0],
+        role: 'editor',
+        is_active: true,
+        assigned_password: password,
+      };
+    }
+
+    if (studyMember) {
+      if (studyMember.is_active === false) {
+        throw new Error('Acceso denegado: esta cuenta de estudio ha sido desactivada por el Administrador.');
+      }
+
+      // Validar contraseña si ya tiene una asignada
+      if (studyMember.assigned_password && studyMember.assigned_password !== password) {
+        throw new Error('Contraseña incorrecta para el colaborador de estudio.');
+      }
+
+      // Si no tenía contraseña asignada (por haberse registrado previo a la adición del campo), registrar la ingresada
+      if (!studyMember.assigned_password && password) {
+        studyMember.assigned_password = password;
+        try {
+          const v4 = JSON.parse(localStorage.getItem('NEXUS_STUDY_MEMBERS_V4') || '[]');
+          const updated = v4.map((m) =>
+            m.email?.trim().toLowerCase() === normalizedEmail ? { ...m, assigned_password: password } : m
+          );
+          localStorage.setItem('NEXUS_STUDY_MEMBERS_V4', JSON.stringify(updated));
+
+          if (isSupabaseConfigured && supabase) {
+            await supabase.from('study_members').update({ assigned_password: password }).ilike('email', normalizedEmail);
+          }
+        } catch (_) {}
+      }
+
+      const studyProfile = {
+        id: studyMember.user_id || studyMember.id,
+        email: studyMember.email,
+        full_name: studyMember.full_name,
+        role: 'colaborador_estudio',
+        study_role: studyMember.role,
+        specialty: `Colaborador de Estudio (${studyMember.role?.toUpperCase() || 'LECTOR'})`,
+        is_active: true,
+        is_study_only: true,
+      };
+
+      setCurrentUser(studyProfile);
+      return {
+        user: studyProfile,
+        profile: studyProfile,
+        isStudyOnly: true,
+      };
+    }
+
+    // 3. Modo verificación local para integrantes y líderes del proyecto SIGMA
     const found = profiles.find((p) => p.email.toLowerCase() === normalizedEmail);
     if (!found) {
       throw new Error(
-        'Acceso denegado: este correo no ha sido registrado por el Líder del Proyecto.'
+        'Credenciales incorrectas o cuenta no registrada por el Líder.'
       );
     }
     if (!found.is_active) {

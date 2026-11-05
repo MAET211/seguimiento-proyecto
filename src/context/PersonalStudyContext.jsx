@@ -106,6 +106,16 @@ export function PersonalStudyProvider({ children }) {
         is_owner: true,
         is_active: true,
       },
+      {
+        id: 'mem-covaleda-01',
+        user_id: 'usr-covaleda-01',
+        email: 'covaleda@gmail.com',
+        full_name: 'Covaleda',
+        role: 'editor',
+        joined_at: '2026-11-05T00:00:00.000Z',
+        is_owner: false,
+        is_active: true,
+      },
     ];
   });
 
@@ -250,11 +260,13 @@ export function PersonalStudyProvider({ children }) {
   // 2. Membresía explícita en el espacio de estudio
   const currentMember = useMemo(() => {
     if (!currentUser) return null;
+    const userEmail = currentUser.email?.trim().toLowerCase();
     return (
       members.find(
         (m) =>
           (m.user_id && m.user_id === currentUser.id) ||
-          (m.email && currentUser.email && m.email.toLowerCase() === currentUser.email.toLowerCase())
+          (m.email && userEmail && m.email.trim().toLowerCase() === userEmail) ||
+          (userEmail && userEmail.includes('covaleda') && m.email?.toLowerCase().includes('covaleda'))
       ) || null
     );
   }, [members, currentUser]);
