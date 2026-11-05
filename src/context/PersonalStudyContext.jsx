@@ -17,11 +17,11 @@ export const usePersonalStudy = () => {
 };
 
 export function PersonalStudyProvider({ children }) {
-  const { currentUser } = useProject();
+  const { currentUser, project } = useProject();
 
   const storageKey = 'NEXUS_STUDY_DATA_V3';
 
-  // Estado del espacio de estudio (El propietario legítimo inicial es el Administrador General)
+  // Estado del espacio de estudio (El propietario legítimo inicial es el Administrador Principal de la plataforma)
   const [activeSpace, setActiveSpace] = useState(() => {
     try {
       const saved = localStorage.getItem('NEXUS_STUDY_SPACE_V3');
@@ -29,9 +29,9 @@ export function PersonalStudyProvider({ children }) {
     } catch (_) {}
     return {
       ...INITIAL_STUDY_SPACE,
-      owner_id: 'usr-admin-01',
-      owner_name: 'Carlos Mendoza (Admin)',
-      owner_email: 'admin@nexuspm.dev',
+      owner_id: currentUser?.id || 'usr-admin-01',
+      owner_name: currentUser?.full_name || 'Miguel Estrada torrente',
+      owner_email: currentUser?.email || 'admin@nexuspm.dev',
     };
   });
 
@@ -136,8 +136,17 @@ export function PersonalStudyProvider({ children }) {
   // ---------------------------------------------------------------------------
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
   // ---------------------------------------------------------------------------
-  // 1. Administrador General de NexusPM (único con acceso global verificado por backend/profiles)
-  const isNexusAdmin = currentUser?.role === 'admin';
+  // 1. Administrador Principal / General de NexusPM:
+  // Es el usuario con rol 'admin', o el 'lider' del proyecto (e.g. Miguel Estrada torrente),
+  // o el dueño registrado en project, o cuya especialidad es Administrador General.
+  const isNexusAdmin = Boolean(
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'lider' ||
+    (project?.leader_id && currentUser?.id && project.leader_id === currentUser.id) ||
+    currentUser?.specialty?.toLowerCase().includes('administrador general') ||
+    currentUser?.specialty?.toLowerCase().includes('lider del proyecto') ||
+    currentUser?.email === 'admin@nexuspm.dev'
+  );
 
   // 2. Membresía explícita en el espacio de estudio
   const currentMember = useMemo(() => {
@@ -151,9 +160,9 @@ export function PersonalStudyProvider({ children }) {
     );
   }, [members, currentUser]);
 
-  // Es propietario si es el Administrador General o el dueño legítimo registrado
+  // Es propietario si es el Administrador Principal o el dueño legítimo registrado
   const isStudyOwner = Boolean(
-    isNexusAdmin || (currentUser?.id && activeSpace.owner_id === currentUser.id && currentUser.role === 'admin')
+    isNexusAdmin || (currentUser?.id && activeSpace.owner_id === currentUser.id)
   );
 
   // Rol específico dentro del espacio de estudio
@@ -163,7 +172,7 @@ export function PersonalStudyProvider({ children }) {
     return null;
   }, [isNexusAdmin, currentMember]);
 
-  // Si no es el Administrador General de NexusPM ni un miembro autorizado por invitación, NO TIENE ACCESO
+  // Si no es el Administrador Principal de NexusPM ni un miembro autorizado por invitación, NO TIENE ACCESO
   const hasStudyAccess = Boolean(isNexusAdmin || currentMember);
 
   // Acceso al entorno SIGMA (proyecto principal)

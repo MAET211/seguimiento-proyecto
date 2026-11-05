@@ -223,19 +223,46 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Botón rápido para alternar a SIGMA cuando se navega dentro de Estudio Personal */}
-        {isStudyEnv && hasSigmaAccess && (
-          <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-purple-50/40 dark:bg-purple-950/20">
-            <button
-              onClick={() => {
-                setSidebarOpen(false);
-                navigate('/');
-              }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-purple-700 dark:text-purple-300 bg-white dark:bg-slate-900 hover:bg-purple-100 dark:hover:bg-purple-900/40 border border-purple-200 dark:border-purple-800/80 transition-all shadow-xs"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Volver a Proyecto SIGMA</span>
-            </button>
+        {/* Selector de Entornos para el Administrador Principal (Acceso Dual SIGMA vs Estudio Personal) */}
+        {hasStudyAccess && hasSigmaAccess && (
+          <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 px-0.5">
+              <span>Entorno de Trabajo</span>
+              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                Acceso Dual
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/70 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+              <button
+                onClick={() => {
+                  setSidebarOpen(false);
+                  navigate('/');
+                }}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${
+                  !isStudyEnv
+                    ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span>🏢</span>
+                <span>SIGMA</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setSidebarOpen(false);
+                  navigate('/estudio-personal');
+                }}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${
+                  isStudyEnv
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span>🎓</span>
+                <span>Estudio</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -465,8 +492,33 @@ export default function Layout() {
             )}
           </div>
 
-          {/* Controles derechos: Progreso global rápido, Notificaciones, Modo Oscuro */}
+          {/* Controles derechos: Conmutador rápido de entorno, Progreso global rápido, Notificaciones, Modo Oscuro */}
           <div className="flex items-center gap-2.5">
+            {/* Acceso rápido a conmutar entorno para el Administrador Principal */}
+            {hasStudyAccess && hasSigmaAccess && (
+              <button
+                onClick={() => navigate(isStudyEnv ? '/' : '/estudio-personal')}
+                className={`hidden md:inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs ${
+                  isStudyEnv
+                    ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                    : 'bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                }`}
+                title={isStudyEnv ? 'Ir a Proyecto SIGMA' : 'Ir a Estudio Personal'}
+              >
+                {isStudyEnv ? (
+                  <>
+                    <span>🏢</span>
+                    <span>Ir a Proyecto SIGMA</span>
+                  </>
+                ) : (
+                  <>
+                    <GraduationCap className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <span>Ir a Estudio Personal</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Indicador compacto de avance conmutado por entorno */}
             <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
