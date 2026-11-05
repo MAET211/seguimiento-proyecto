@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Sparkles,
   ExternalLink,
+  GraduationCap,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { ROLE_CONFIG, formatDateTime, getInitials } from '../utils/formatters';
@@ -234,6 +235,35 @@ export default function Layout() {
               </NavLink>
             );
           })}
+
+          {/* Sección y Enlace al Espacio Independiente de Estudio Personal */}
+          <div className="pt-3 mt-2 border-t border-slate-200/80 dark:border-slate-800">
+            <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center justify-between">
+              <span>Espacio Académico</span>
+              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                Privado
+              </span>
+            </div>
+            <NavLink
+              to="/estudio-personal"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all mt-1 ${
+                  isActive
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm shadow-purple-600/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-purple-50/50 dark:hover:bg-purple-950/30'
+                }`
+              }
+            >
+              <div className="flex items-center gap-3">
+                <GraduationCap className="w-4 h-4 shrink-0 text-purple-600 dark:text-purple-400" />
+                <span>Estudio Personal</span>
+              </div>
+              <span className="px-1.5 py-0.5 text-[10px] rounded-md font-bold bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                Entorno 2
+              </span>
+            </NavLink>
+          </div>
         </nav>
 
         {/* Estado de conexión a Supabase y botón de configuración */}

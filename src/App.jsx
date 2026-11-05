@@ -9,6 +9,7 @@ import WorkPlanPage from './pages/WorkPlanPage';
 import ChangelogPage from './pages/ChangelogPage';
 import RepositoriesPage from './pages/RepositoriesPage';
 import AdminTeamPage from './pages/AdminTeamPage';
+import PersonalStudyPage from './pages/PersonalStudyPage';
 
 /**
  * Guardia de seguridad de historial del navegador (flechas Atrás / Adelante de Chrome):
@@ -118,6 +119,7 @@ export default function App() {
             <Route path="novedades" element={<ChangelogPage />} />
             <Route path="repositorios" element={<RepositoriesPage />} />
             <Route path="administracion" element={<AdminTeamPage />} />
+            <Route path="estudio-personal" element={<PersonalStudyPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
