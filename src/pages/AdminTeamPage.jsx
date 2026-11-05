@@ -38,6 +38,7 @@ export default function AdminTeamPage() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [editingMemberResp, setEditingMemberResp] = useState(null);
   const [createdCredentialsToast, setCreatedCredentialsToast] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   // Estado para formulario de Configuración General del Proyecto
   const [projName, setProjName] = useState(project?.name || '');
@@ -294,24 +295,28 @@ export default function AdminTeamPage() {
                               </button>
                               <button
                                 type="button"
+                                disabled={deletingId === u.id}
                                 onClick={async () => {
                                   if (
                                     window.confirm(
                                       `¿Estás seguro de eliminar permanentemente al integrante "${u.full_name}" del proyecto?`
                                     )
                                   ) {
+                                    setDeletingId(u.id);
                                     try {
                                       await deleteUser(u.id);
                                     } catch (err) {
                                       alert(err.message || 'Error al eliminar usuario.');
+                                    } finally {
+                                      setDeletingId(null);
                                     }
                                   }
                                 }}
-                                className="px-2.5 py-1 rounded-lg font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 inline-flex items-center gap-1"
+                                className="px-2.5 py-1 rounded-lg font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 inline-flex items-center gap-1 disabled:opacity-50"
                                 title="Eliminar integrante del proyecto"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
-                                <span>Eliminar</span>
+                                <span>{deletingId === u.id ? 'Eliminando...' : 'Eliminar'}</span>
                               </button>
                             </>
                           )}

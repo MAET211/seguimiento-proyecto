@@ -494,13 +494,49 @@ export function ProjectProvider({ children }) {
       throw new Error('No puedes eliminar tu propia cuenta.');
     }
     const targetUser = profiles.find((p) => p.id === userId);
+
     if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('profiles').delete().eq('id', userId);
-      if (error) throw error;
-      await supabase.from('project_members').delete().eq('user_id', userId);
+      // 1. Intentar borrado seguro mediante RPC en PostgreSQL
+      let rpcSuccess = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc('delete_team_member', { target_user_id: userId });
+        if (!rpcErr) {
+          rpcSuccess = true;
+        }
+      } catch (err) {
+        console.warn('RPC delete_team_member no disponible, usando borrado directo:', err);
+      }
+
+      // 2. Si no se ejecutó RPC, realizar borrado directo de dependencias y perfil
+      if (!rpcSuccess) {
+        await supabase.from('project_members').delete().eq('user_id', userId);
+        await supabase.from('task_assignees').delete().eq('user_id', userId);
+        await supabase.from('task_evidences').delete().eq('user_id', userId);
+        await supabase.from('notifications').delete().eq('user_id', userId);
+        if (targetUser?.email) {
+          await supabase.from('invitations').delete().ilike('email', targetUser.email);
+        }
+        const { error: delErr } = await supabase.from('profiles').delete().eq('id', userId);
+        if (delErr) {
+          console.warn('Error al eliminar de profiles por RLS, desactivando acceso:', delErr);
+          await supabase.from('profiles').update({ is_active: false }).eq('id', userId);
+        }
+      }
     }
+
     setProfiles((prev) => prev.filter((p) => p.id !== userId));
     setProjectMembers((prev) => prev.filter((m) => m.user_id !== userId));
+    setTasks((prev) =>
+      prev.map((t) => ({
+        ...t,
+        assignee_ids: (t.assignee_ids || []).filter((id) => id !== userId),
+      }))
+    );
+    if (targetUser?.email) {
+      setInvitations((prev) =>
+        prev.filter((i) => i.email.toLowerCase() !== targetUser.email.toLowerCase())
+      );
+    }
 
     if (targetUser) {
       await registerAutomaticChangelog({

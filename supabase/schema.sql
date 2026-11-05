@@ -292,6 +292,42 @@ BEGIN
 END;
 $$;
 
+-- Función para eliminar integrantes de forma atómica y segura por Admin/Líder
+CREATE OR REPLACE FUNCTION public.delete_team_member(target_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    caller_role TEXT;
+    target_email TEXT;
+BEGIN
+    SELECT role INTO caller_role FROM public.profiles WHERE id = auth.uid() AND is_active = true;
+    IF caller_role NOT IN ('admin', 'lider') THEN
+        RAISE EXCEPTION 'No tienes permisos para eliminar integrantes';
+    END IF;
+
+    IF target_user_id = auth.uid() THEN
+        RAISE EXCEPTION 'No puedes eliminar tu propia cuenta';
+    END IF;
+
+    SELECT email INTO target_email FROM public.profiles WHERE id = target_user_id;
+
+    DELETE FROM public.project_members WHERE user_id = target_user_id;
+    DELETE FROM public.task_assignees WHERE user_id = target_user_id;
+    DELETE FROM public.task_evidences WHERE user_id = target_user_id;
+    DELETE FROM public.notifications WHERE user_id = target_user_id;
+    IF target_email IS NOT NULL THEN
+        DELETE FROM public.invitations WHERE LOWER(email) = LOWER(target_email);
+    END IF;
+
+    DELETE FROM public.profiles WHERE id = target_user_id;
+
+    RETURN TRUE;
+END;
+$$;
+
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
@@ -324,6 +360,10 @@ CREATE POLICY "Usuarios editan su propio perfil o Admin/Lider gestiona perfiles"
 CREATE POLICY "Permitir inserción de perfil propio o por Admin/Lider"
     ON public.profiles FOR INSERT TO authenticated
     WITH CHECK (auth.uid() = id OR public.get_my_role() IN ('admin', 'lider'));
+
+CREATE POLICY "Admin y Líder eliminan perfiles"
+    ON public.profiles FOR DELETE TO authenticated
+    USING (public.get_my_role() IN ('admin', 'lider') AND id <> auth.uid());
 
 CREATE POLICY "Invitaciones visibles para usuarios autenticados"
     ON public.invitations FOR SELECT TO authenticated USING (true);
