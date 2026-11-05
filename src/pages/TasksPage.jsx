@@ -17,6 +17,9 @@ import {
   Link2,
   UserCheck,
   MessageSquareWarning,
+  BellRing,
+  Mail,
+  ShieldCheck,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import {
@@ -57,6 +60,8 @@ export default function TasksPage() {
   const [progressTask, setProgressTask] = useState(null);
   const [submitReviewTask, setSubmitReviewTask] = useState(null);
   const [leaderReviewTask, setLeaderReviewTask] = useState(null);
+  const [reminderTask, setReminderTask] = useState(null);
+  const [auditBanner, setAuditBanner] = useState(null);
 
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch =
@@ -72,6 +77,42 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-6">
+      {/* Banner de Auditoría Oficial de Notificaciones y Recordatorios */}
+      {auditBanner && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-950 dark:text-amber-100 flex items-start justify-between gap-4 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-amber-600 text-slate-950 font-bold shrink-0 mt-0.5 shadow-xs">
+              <BellRing className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/25 text-amber-900 dark:text-amber-300">
+                  {auditBanner.title}
+                </span>
+                {auditBanner.code && (
+                  <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">
+                    Ref: {auditBanner.code}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">
+                {auditBanner.message}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {auditBanner.details}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setAuditBanner(null)}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-amber-500/10 transition-colors"
+            title="Cerrar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Cabecera del Módulo */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div>
@@ -255,6 +296,16 @@ export default function TasksPage() {
 
                     {isLeaderOrAdmin && (
                       <div className="flex items-center gap-1 ml-2">
+                        {assignees.length > 0 && task.status !== 'completada' && (
+                          <button
+                            type="button"
+                            onClick={() => setReminderTask(task)}
+                            className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                            title="Emitir recordatorio oficial por correo al desarrollador"
+                          >
+                            <BellRing className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -425,6 +476,18 @@ export default function TasksPage() {
 
                     {/* Botones de flujo de trabajo según rol y estado */}
                     <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70">
+                      {isLeaderOrAdmin && assignees.length > 0 && task.status !== 'completada' && (
+                        <button
+                          type="button"
+                          onClick={() => setReminderTask(task)}
+                          className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                          title="Enviar recordatorio formal por correo al desarrollador asignado con firma del Líder"
+                        >
+                          <BellRing className="w-3.5 h-3.5" />
+                          <span>Recordar al desarrollador</span>
+                        </button>
+                      )}
+
                       {canUpdateProgress && task.status !== 'completada' && (
                         <div className="grid grid-cols-1 gap-2">
                           <button
@@ -487,7 +550,16 @@ export default function TasksPage() {
             if (editingTask) {
               await updateTask(editingTask.id, payload);
             } else {
-              await createTask(payload);
+              const res = await createTask(payload);
+              const assignedDevs = profiles.filter((p) => payload.assignee_ids?.includes(p.id));
+              setAuditBanner({
+                title: 'Tarea Asignada y Notificada por Correo',
+                message: `Tarea "${payload.title}" delegada con éxito`,
+                code: res?.emailResults?.[0]?.auditCode || 'SIGMA-AUDIT-TSK',
+                details: `Se envió la notificación formal con la auditoría de la plataforma SIGMA y firma del Líder al correo de: ${
+                  assignedDevs.map((d) => `${d.full_name} (${d.email})`).join(', ') || 'equipo'
+                }.`,
+              });
             }
             setCreateModalOpen(false);
             setEditingTask(null);
@@ -527,6 +599,22 @@ export default function TasksPage() {
           onDecision={async (data) => {
             await reviewTaskByLeader(leaderReviewTask.id, data);
             setLeaderReviewTask(null);
+          }}
+        />
+      )}
+
+      {/* Modal 5: Recordatorio de Tarea al Desarrollador con Auditoría Oficial (Líder / Admin) */}
+      {reminderTask && (
+        <TaskReminderModal
+          task={reminderTask}
+          onClose={() => setReminderTask(null)}
+          onReminderSent={({ task, assignee, result }) => {
+            setAuditBanner({
+              title: 'Recordatorio Formal Emitido al Desarrollador',
+              message: `Recordatorio enviado a ${assignee.full_name} (${assignee.email})`,
+              code: result.auditCode,
+              details: `Se notificó el seguimiento para la tarea "${task.title}". Registro firmado por el Líder y archivado en la auditoría del sistema.`,
+            });
           }}
         />
       )}
@@ -769,6 +857,14 @@ function TaskFormModal({ initialTask, onClose, onSave }) {
             </div>
           </div>
 
+          {/* Aviso de Auditoría y Notificación por Correo */}
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
+            <Mail className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Notificación de Asignación Automática:</strong> Al delegar esta tarea, el desarrollador seleccionado recibirá una notificación formal en su correo registrado con la auditoría de la plataforma SIGMA y firma de la autoridad (Líder del Proyecto).
+            </span>
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
@@ -782,7 +878,7 @@ function TaskFormModal({ initialTask, onClose, onSave }) {
               disabled={saving}
               className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {saving ? 'Guardando...' : initialTask ? 'Guardar Cambios' : 'Delegar Tarea'}
+              {saving ? 'Guardando...' : initialTask ? 'Guardar Cambios' : 'Delegar y Notificar'}
             </button>
           </div>
         </form>
@@ -1096,6 +1192,218 @@ function LeaderReviewModal({ task, onClose, onDecision }) {
             <span>Aprobar y Completar Tarea</span>
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskReminderModal({ task, onClose, onReminderSent }) {
+  const { profiles, currentUser, sendTaskReminder } = useProject();
+  const assignees = profiles.filter((p) => task.assignee_ids?.includes(p.id));
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState(
+    assignees[0]?.id || ''
+  );
+  const [customNote, setCustomNote] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sentAudit, setSentAudit] = useState(null);
+
+  const selectedAssignee =
+    profiles.find((p) => p.id === selectedAssigneeId) || assignees[0];
+
+  const handleSendReminder = async (e) => {
+    e.preventDefault();
+    if (!selectedAssigneeId) {
+      alert('Selecciona al desarrollador al que deseas enviar el recordatorio.');
+      return;
+    }
+    setSending(true);
+    try {
+      const result = await sendTaskReminder({
+        taskId: task.id,
+        assigneeId: selectedAssigneeId,
+        customNote,
+      });
+      setSentAudit(result);
+      if (onReminderSent) {
+        onReminderSent({
+          task,
+          assignee: selectedAssignee,
+          result,
+        });
+      }
+    } catch (err) {
+      alert('Error enviando recordatorio: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl my-8">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+              <BellRing className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Recordatorio de Tarea al Desarrollador
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Emisión de recordatorio formal con auditoría oficial y firma del Líder
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {sentAudit ? (
+          <div className="py-6 space-y-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/15 text-emerald-600 mx-auto flex items-center justify-center">
+              <CheckCircle2 className="w-7 h-7" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                ¡Recordatorio Emitido con Éxito!
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-md mx-auto">
+                Se notificó a <strong>{selectedAssignee?.full_name}</strong> al correo:{' '}
+                <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">
+                  {selectedAssignee?.email}
+                </span>
+                .
+              </p>
+              <div className="mt-4 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-left text-xs space-y-1.5 font-mono">
+                <p>
+                  <strong>Código de Auditoría:</strong> {sentAudit.auditCode}
+                </p>
+                <p>
+                  <strong>Fecha y Hora:</strong> {sentAudit.timestamp}
+                </p>
+                <p>
+                  <strong>Autoridad Emisora:</strong> {currentUser?.full_name} (Líder / Administrador)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+              {sentAudit.mailtoUrl && (
+                <a
+                  href={sentAudit.mailtoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Abrir copia en cliente de correo</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSendReminder} className="space-y-4 mt-4">
+            {/* Resumen de la tarea */}
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Tarea Seleccionada
+                </span>
+                <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                  Progreso actual: {task.progress || 0}%
+                </span>
+              </div>
+              <p className="font-bold text-slate-900 dark:text-white text-sm">
+                {task.title}
+              </p>
+              <div className="flex items-center gap-3 text-slate-500 text-[11px]">
+                <span>
+                  Límite: <strong>{formatDate(task.due_date)}</strong>
+                </span>
+                <span>•</span>
+                <span>
+                  Prioridad: <strong>{task.priority?.toUpperCase()}</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Desarrollador destinatario */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Desarrollador a Recordar *
+              </label>
+              <select
+                value={selectedAssigneeId}
+                onChange={(e) => setSelectedAssigneeId(e.target.value)}
+                className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-medium"
+              >
+                {assignees.map((dev) => (
+                  <option key={dev.id} value={dev.id}>
+                    {dev.full_name} ({dev.email}) — {dev.specialty || 'Desarrollador'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Instrucción o nota puntual del líder */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Mensaje o Instrucción Puntual del Líder (Opcional)
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Ej: Estimado desarrollador, le recuerdo que la entrega está fijada para esta semana. Por favor reporte avances y adjunte las evidencias pendientes..."
+                value={customNote}
+                onChange={(e) => setCustomNote(e.target.value)}
+                className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+              />
+            </div>
+
+            {/* Cuadro de Auditoría */}
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Auditoría Institucional de SIGMA:</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                  El recordatorio será firmado por <strong>{currentUser?.full_name}</strong> como Líder de Proyecto / Administrador General, asignándole un código de trazabilidad único registrado en el historial oficial del sistema.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={sending}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 shadow-sm transition-colors"
+              >
+                <BellRing className="w-3.5 h-3.5" />
+                <span>
+                  {sending ? 'Emitiendo Recordatorio...' : 'Emitir Recordatorio Oficial'}
+                </span>
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

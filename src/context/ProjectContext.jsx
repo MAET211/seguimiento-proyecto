@@ -5,6 +5,11 @@ import {
   createIsolatedSupabaseClient,
 } from '../lib/supabase';
 import {
+  sendGeneralWorkPlanEmailNotification,
+  sendPrivateTaskAssignmentEmailNotification,
+  sendTaskReminderEmailNotification,
+} from '../services/emailService';
+import {
   INITIAL_PROFILES,
   INITIAL_INVITATIONS,
   INITIAL_PROJECT,
@@ -876,25 +881,48 @@ export function ProjectProvider({ children }) {
       setTasks((prev) => [...prev, newTask]);
     }
 
-    const assigneeNames = profiles
-      .filter((p) => assignee_ids.includes(p.id))
-      .map((p) => p.full_name)
-      .join(', ');
+    const assignedProfiles = profiles.filter(
+      (p) => assignee_ids.includes(p.id) && p.is_active
+    );
+    const assigneeNames = assignedProfiles.map((p) => p.full_name).join(', ');
+
+    // Notificación formal por correo a cada desarrollador con auditoría oficial del Líder
+    const emailResults = [];
+    for (const dev of assignedProfiles) {
+      try {
+        const res = await sendPrivateTaskAssignmentEmailNotification({
+          task: {
+            title,
+            description,
+            instructions,
+            priority,
+            due_date,
+          },
+          leader: currentUser,
+          assigneeProfile: dev,
+        });
+        emailResults.push(res);
+      } catch (err) {
+        console.warn('Error enviando notificación por correo:', err);
+      }
+    }
 
     await registerAutomaticChangelog({
       title: `Nueva tarea delegada: ${title}`,
-      description: `${currentUser?.full_name} asignó la tarea "${title}" (Prioridad: ${priority.toUpperCase()}, Entrega: ${due_date}) a: ${assigneeNames || 'Equipo'}.`,
+      description: `${currentUser?.full_name} asignó en privado la tarea "${title}" (Prioridad: ${priority.toUpperCase()}, Entrega: ${due_date}) a: ${assigneeNames || 'Equipo'}. Notificación oficial remitida al correo de cada desarrollador asignado.`,
       taskId: createdTaskId,
       entryType: 'asignacion',
     });
 
     await dispatchNotification({
       recipientIds: assignee_ids,
-      title: 'Nueva tarea asignada',
-      message: `${currentUser?.full_name} te ha delegado la tarea "${title}" con fecha límite ${due_date}.`,
+      title: 'Nueva tarea privada asignada por el Líder',
+      message: `${currentUser?.full_name} te ha delegado formalmente la tarea "${title}" con fecha límite ${due_date}. Se remitió la auditoría correspondiente a tu correo institucional/registrado.`,
       notificationType: 'nueva_tarea',
       relatedTaskId: createdTaskId,
     });
+
+    return { createdTaskId, emailResults };
   };
 
   const updateTask = async (taskId, updates) => {
@@ -1166,6 +1194,49 @@ export function ProjectProvider({ children }) {
     }
   };
 
+  const sendTaskReminder = async ({ taskId, assigneeId, customNote = '' }) => {
+    if (!currentUser || (currentUser.role !== 'lider' && currentUser.role !== 'admin')) {
+      throw new Error(
+        'Solo el Líder del Proyecto o Administrador General tiene permisos para emitir recordatorios oficiales.'
+      );
+    }
+
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error('Tarea no encontrada.');
+
+    const assignee = profiles.find((p) => p.id === assigneeId);
+    if (!assignee) throw new Error('Desarrollador asignado no encontrado.');
+
+    // Notificación formal por correo con membrete y código de auditoría
+    const emailResult = await sendTaskReminderEmailNotification({
+      task,
+      leader: currentUser,
+      assigneeProfile: assignee,
+      customNote,
+    });
+
+    // Notificación en plataforma con alta prioridad para el desarrollador
+    await dispatchNotification({
+      recipientIds: [assignee.id],
+      title: `⚠️ [RECORDATORIO URGENTE] Seguimiento de Tarea: ${task.title}`,
+      message: `El Líder ${currentUser.full_name} te ha emitido un recordatorio formal para la tarea "${task.title}". Fecha límite: ${task.due_date}. ${
+        customNote ? `Instrucción del Líder: "${customNote}". ` : ''
+      }Se remitió copia con auditoría oficial a tu correo: ${assignee.email}.`,
+      notificationType: 'recordatorio_urgente',
+      relatedTaskId: task.id,
+    });
+
+    // Registro en el changelog / trazabilidad de auditoría
+    await registerAutomaticChangelog({
+      title: `Recordatorio emitido a desarrollador: ${assignee.full_name}`,
+      description: `El Líder ${currentUser.full_name} envió recordatorio formal por correo a ${assignee.full_name} (${assignee.email}) para la entrega de "${task.title}". Código de auditoría: ${emailResult.auditCode}.`,
+      taskId: task.id,
+      entryType: 'seguimiento',
+    });
+
+    return emailResult;
+  };
+
   // ---------------------------------------------------------------------------
   // MÓDULO 4: NOVEDADES MANUALES Y TRAZABILIDAD
   // ---------------------------------------------------------------------------
@@ -1343,20 +1414,47 @@ export function ProjectProvider({ children }) {
       setWorkPlan((prev) => [...prev, newAct]);
     }
 
+    const activeProfiles = profiles.filter((p) => p.is_active);
+    const respProfile = profiles.find((p) => p.id === responsible_id);
+
+    // Enviar notificación formal por correo a cada integrante activo con auditoría de la plataforma y del Líder
+    let emailAudit = null;
+    try {
+      emailAudit = await sendGeneralWorkPlanEmailNotification({
+        activity: {
+          phase,
+          name,
+          description,
+          responsible_name: respProfile?.full_name || 'Equipo General',
+          start_date,
+          end_date,
+          priority,
+          status,
+        },
+        leader: currentUser,
+        activeProfiles,
+      });
+    } catch (err) {
+      console.warn('Error enviando notificación por correo para plan de trabajo:', err);
+    }
+
     await registerAutomaticChangelog({
       title: `Nueva actividad en el Plan de Trabajo: ${name}`,
-      description: `${currentUser?.full_name} programó la actividad "${name}" (${start_date} al ${end_date}) en ${phase}.`,
+      description: `${currentUser?.full_name} programó la actividad "${name}" (${start_date} al ${end_date}) en ${phase}.${
+        emailAudit ? ` Auditoría: ${emailAudit.auditCode}. Notificado por correo a todo el equipo (${emailAudit.recipientCount} integrantes).` : ''
+      }`,
       entryType: 'cronograma',
     });
 
-    if (responsible_id) {
-      await dispatchNotification({
-        recipientIds: [responsible_id],
-        title: 'Actualización del Cronograma / Plan de Trabajo',
-        message: `Se te ha asignado la actividad "${name}" en el Plan de Trabajo (${start_date} a ${end_date}).`,
-        notificationType: 'cronograma',
-      });
-    }
+    // Notificación en plataforma a todos los miembros activos
+    await dispatchNotification({
+      recipientIds: activeProfiles.map((p) => p.id),
+      title: `[Auditoría Oficial] Nueva actividad en Plan de Trabajo: ${name}`,
+      message: `El Líder ${currentUser?.full_name} incorporó la actividad "${name}" (${start_date} al ${end_date}) en ${phase}. Se emitió notificación de auditoría a todos los correos del equipo (${activeProfiles.length} usuarios).`,
+      notificationType: 'plan_trabajo_general',
+    });
+
+    return emailAudit;
   };
 
   const updateWorkPlanActivity = async (id, updates) => {
@@ -1549,6 +1647,7 @@ export function ProjectProvider({ children }) {
     submitTaskForLeaderReview,
     reviewTaskByLeader,
     deleteTask,
+    sendTaskReminder,
     addManualChangelog,
     addRepositoryResource,
     deleteRepositoryResource,

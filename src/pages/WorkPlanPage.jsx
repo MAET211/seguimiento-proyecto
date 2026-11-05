@@ -10,6 +10,8 @@ import {
   AlertCircle,
   X,
   SlidersHorizontal,
+  Mail,
+  ShieldCheck,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import {
@@ -33,6 +35,7 @@ export default function WorkPlanPage() {
   const [responsibleFilter, setResponsibleFilter] = useState('todos');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState(null);
+  const [auditBanner, setAuditBanner] = useState(null);
 
   const filteredActivities = useMemo(() => {
     return workPlan
@@ -78,6 +81,40 @@ export default function WorkPlanPage() {
 
   return (
     <div className="space-y-6">
+      {/* Banner de Auditoría Oficial de Notificaciones por Correo */}
+      {auditBanner && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-950 dark:text-emerald-100 flex items-start justify-between gap-4 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-emerald-600 text-white shrink-0 mt-0.5 shadow-xs">
+              <Mail className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-600/20 text-emerald-800 dark:text-emerald-300">
+                  Auditoría Oficial Emitida
+                </span>
+                <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">
+                  Ref: {auditBanner.code}
+                </span>
+              </div>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">
+                Actividad incorporada al Plan de Trabajo: "{auditBanner.name}"
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Se notificó formalmente al correo de cada usuario ({auditBanner.count} integrantes activos) con la auditoría de la plataforma <strong>SIGMA - Sistema de Gestión de Ambulancias</strong> y la firma de la autoridad (Líder del Proyecto).
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setAuditBanner(null)}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-emerald-500/10 transition-colors"
+            title="Cerrar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Cabecera del Módulo */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -393,7 +430,12 @@ export default function WorkPlanPage() {
             if (editingActivity) {
               await updateWorkPlanActivity(editingActivity.id, payload);
             } else {
-              await addWorkPlanActivity(payload);
+              const res = await addWorkPlanActivity(payload);
+              setAuditBanner({
+                name: payload.name,
+                code: res?.auditCode || 'SIGMA-AUDIT-WP',
+                count: res?.recipientCount || profiles.filter((p) => p.is_active).length,
+              });
             }
             setModalOpen(false);
             setEditingActivity(null);
@@ -590,7 +632,15 @@ function WorkPlanModal({ initialActivity, onClose, onSave }) {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-3">
+          {/* Notificación de Auditoría Automática */}
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
+            <Mail className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Notificación de Auditoría Automática:</strong> Al guardar, se enviará una notificación formal al correo de cada usuario activo con la auditoría oficial de la plataforma SIGMA y firma del Líder del Proyecto.
+            </span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
@@ -603,7 +653,7 @@ function WorkPlanModal({ initialActivity, onClose, onSave }) {
               disabled={saving}
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
             >
-              {saving ? 'Guardando...' : 'Guardar en Cronograma'}
+              {saving ? 'Guardando y Notificando...' : 'Guardar y Notificar al Equipo'}
             </button>
           </div>
         </form>
