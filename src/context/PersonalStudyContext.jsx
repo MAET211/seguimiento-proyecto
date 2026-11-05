@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useProject } from './ProjectContext';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  createIsolatedSupabaseClient,
+} from '../lib/supabase';
 import {
   INITIAL_STUDY_SPACE,
   INITIAL_STUDY_ACTIVITIES,
@@ -19,37 +23,88 @@ export const usePersonalStudy = () => {
 export function PersonalStudyProvider({ children }) {
   const { currentUser, project } = useProject();
 
-  const storageKey = 'NEXUS_STUDY_DATA_V3';
+  const storageKey = 'NEXUS_STUDY_DATA_V4';
 
-  // Estado del espacio de estudio (El propietario legítimo inicial es el Administrador Principal de la plataforma)
+  const ownerName = currentUser?.full_name || 'Miguel Estrada torrente';
+  const ownerEmail = currentUser?.email || 'miguelestrada@proyecto.com';
+  const ownerId = currentUser?.id || 'usr-miguel-admin';
+
+  // Estado del espacio de estudio (El propietario legítimo es Miguel Estrada torrente)
   const [activeSpace, setActiveSpace] = useState(() => {
     try {
-      const saved = localStorage.getItem('NEXUS_STUDY_SPACE_V3');
+      const saved = localStorage.getItem('NEXUS_STUDY_SPACE_V4');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
     return {
       ...INITIAL_STUDY_SPACE,
-      owner_id: currentUser?.id || 'usr-admin-01',
-      owner_name: currentUser?.full_name || 'Miguel Estrada torrente',
-      owner_email: currentUser?.email || 'admin@nexuspm.dev',
+      owner_id: ownerId,
+      owner_name: ownerName,
+      owner_email: ownerEmail,
     };
   });
 
-  // Lista de miembros autorizados (por defecto solo el Administrador General)
+  // Lista de miembros autorizados: El Propietario Principal es estrictamente Miguel Estrada torrente
   const [members, setMembers] = useState(() => {
     try {
-      const saved = localStorage.getItem('NEXUS_STUDY_MEMBERS_V3');
-      if (saved) return JSON.parse(saved);
+      const saved =
+        localStorage.getItem('NEXUS_STUDY_MEMBERS_V4') ||
+        localStorage.getItem('NEXUS_STUDY_MEMBERS_V3');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Filtrar y eliminar a Carlos Mendoza si existía previamente
+        const filtered = parsed.filter(
+          (m) =>
+            !m.email?.toLowerCase().includes('admin@nexuspm.dev') &&
+            !m.full_name?.toLowerCase().includes('carlos mendoza')
+        );
+
+        // Asegurar que Miguel Estrada torrente sea el propietario principal
+        const hasOwner = filtered.some(
+          (m) => m.is_owner || m.email?.toLowerCase() === ownerEmail.toLowerCase()
+        );
+
+        if (hasOwner) {
+          return filtered.map((m) =>
+            m.is_owner || m.email?.toLowerCase() === ownerEmail.toLowerCase()
+              ? {
+                  ...m,
+                  user_id: ownerId,
+                  full_name: ownerName,
+                  email: ownerEmail,
+                  role: 'admin',
+                  is_owner: true,
+                  is_active: true,
+                }
+              : { ...m, is_active: m.is_active !== false }
+          );
+        }
+
+        return [
+          {
+            id: `mem-${ownerId}`,
+            user_id: ownerId,
+            email: ownerEmail,
+            full_name: ownerName,
+            role: 'admin',
+            joined_at: '2026-10-31T00:00:00.000Z',
+            is_owner: true,
+            is_active: true,
+          },
+          ...filtered.map((m) => ({ ...m, is_active: m.is_active !== false })),
+        ];
+      }
     } catch (_) {}
+
     return [
       {
-        id: 'mem-admin-01',
-        user_id: 'usr-admin-01',
-        email: 'admin@nexuspm.dev',
-        full_name: 'Carlos Mendoza (Admin)',
-        role: 'admin', // 'admin' | 'editor' | 'lector'
-        joined_at: '2026-11-01T00:00:00.000Z',
+        id: `mem-${ownerId}`,
+        user_id: ownerId,
+        email: ownerEmail,
+        full_name: ownerName,
+        role: 'admin',
+        joined_at: '2026-10-31T00:00:00.000Z',
         is_owner: true,
+        is_active: true,
       },
     ];
   });
@@ -84,8 +139,8 @@ export function PersonalStudyProvider({ children }) {
   // Sincronización en LocalStorage para garantizar disponibilidad continua
   useEffect(() => {
     try {
-      localStorage.setItem('NEXUS_STUDY_SPACE_V3', JSON.stringify(activeSpace));
-      localStorage.setItem('NEXUS_STUDY_MEMBERS_V3', JSON.stringify(members));
+      localStorage.setItem('NEXUS_STUDY_SPACE_V4', JSON.stringify(activeSpace));
+      localStorage.setItem('NEXUS_STUDY_MEMBERS_V4', JSON.stringify(members));
       localStorage.setItem(`${storageKey}_ACTIVITIES`, JSON.stringify(activities));
       localStorage.setItem(`${storageKey}_ADVANCES`, JSON.stringify(advances));
       localStorage.setItem(`${storageKey}_DOCUMENTS`, JSON.stringify(documents));
@@ -105,7 +160,7 @@ export function PersonalStudyProvider({ children }) {
           .eq('owner_id', currentUser.id)
           .maybeSingle();
 
-        if (spaceErr) return; // Si la tabla aún no fue creada en Supabase, utiliza el almacenamiento aislado local
+        if (spaceErr) return;
 
         if (spaceData && isMounted) {
           setActiveSpace(spaceData);
@@ -120,7 +175,51 @@ export function PersonalStudyProvider({ children }) {
           if (actsRes.data && actsRes.data.length > 0) setActivities(actsRes.data);
           if (advRes.data && advRes.data.length > 0) setAdvances(advRes.data);
           if (docsRes.data && docsRes.data.length > 0) setDocuments(docsRes.data);
-          if (memsRes.data && memsRes.data.length > 0) setMembers(memsRes.data);
+
+          if (memsRes.data && memsRes.data.length > 0) {
+            // Filtrar cualquier referencia residual a Carlos Mendoza
+            const sanitized = memsRes.data.filter(
+              (m) =>
+                !m.email?.toLowerCase().includes('admin@nexuspm.dev') &&
+                !m.full_name?.toLowerCase().includes('carlos mendoza')
+            );
+
+            const hasOwner = sanitized.some(
+              (m) => m.is_owner || m.email?.toLowerCase() === ownerEmail.toLowerCase()
+            );
+
+            if (!hasOwner) {
+              sanitized.unshift({
+                id: `mem-${ownerId}`,
+                space_id: spaceData.id,
+                user_id: ownerId,
+                email: ownerEmail,
+                full_name: ownerName,
+                role: 'admin',
+                joined_at: '2026-10-31T00:00:00.000Z',
+                is_owner: true,
+                is_active: true,
+              });
+            } else {
+              for (let i = 0; i < sanitized.length; i++) {
+                if (
+                  sanitized[i].is_owner ||
+                  sanitized[i].email?.toLowerCase() === ownerEmail.toLowerCase()
+                ) {
+                  sanitized[i] = {
+                    ...sanitized[i],
+                    full_name: ownerName,
+                    email: ownerEmail,
+                    user_id: ownerId,
+                    role: 'admin',
+                    is_owner: true,
+                    is_active: true,
+                  };
+                }
+              }
+            }
+            setMembers(sanitized.map((m) => ({ ...m, is_active: m.is_active !== false })));
+          }
         }
       } catch (e) {
         console.info('Modo Estudio Personal: operando en almacenamiento seguro local sincronizado.');
@@ -131,7 +230,7 @@ export function PersonalStudyProvider({ children }) {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, ownerEmail, ownerFullName, ownerId, ownerName]);
 
   // ---------------------------------------------------------------------------
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
@@ -518,25 +617,72 @@ export function PersonalStudyProvider({ children }) {
   };
 
   // ---------------------------------------------------------------------------
-  // ADMINISTRACIÓN DE COLABORADORES Y PERMISOS
+  // ADMINISTRACIÓN DE COLABORADORES Y PERMISOS (ALTA CON CONTRASEÑA, ACTIVAR Y ELIMINAR)
   // ---------------------------------------------------------------------------
-  const inviteStudyMember = async ({ email, fullName, role = 'lector' }) => {
+  const inviteStudyMember = async ({ email, fullName, role = 'lector', password }) => {
     if (!canManageMembers) throw new Error('Solo el Administrador del espacio puede invitar colaboradores.');
 
     const cleanEmail = email.trim().toLowerCase();
-    const existing = members.find((m) => m.email.toLowerCase() === cleanEmail);
+    const existing = members.find((m) => m.email?.toLowerCase() === cleanEmail);
     if (existing) {
-      throw new Error(`El usuario ${cleanEmail} ya se encuentra autorizado como ${existing.role}.`);
+      throw new Error(`El usuario ${cleanEmail} ya se encuentra registrado como ${existing.role}.`);
+    }
+
+    let authUserId = null;
+
+    // Si Supabase está conectado y se proporcionó contraseña, crear la cuenta en Supabase Auth
+    if (isSupabaseConfigured && password) {
+      const isolatedClient = createIsolatedSupabaseClient();
+      if (isolatedClient) {
+        try {
+          const { data: signUpData, error: signUpErr } = await isolatedClient.auth.signUp({
+            email: cleanEmail,
+            password,
+            options: {
+              data: {
+                full_name: fullName.trim() || cleanEmail.split('@')[0],
+                role: 'colaborador_estudio',
+                specialty: `Colaborador de Estudio (${role.toUpperCase()})`,
+              },
+            },
+          });
+
+          if (signUpErr && !signUpErr.message?.includes('already registered')) {
+            throw signUpErr;
+          }
+
+          authUserId = signUpData?.user?.id;
+
+          // Asegurar que exista fila en profiles para permitir inicio de sesión y verificación de estado
+          if (authUserId && supabase) {
+            await supabase.from('profiles').upsert([
+              {
+                id: authUserId,
+                email: cleanEmail,
+                full_name: fullName.trim() || cleanEmail.split('@')[0],
+                role: 'colaborador_estudio',
+                specialty: `Colaborador de Estudio (${role.toUpperCase()})`,
+                is_active: true,
+              },
+            ]);
+          }
+        } catch (authErr) {
+          console.warn('Registro en Supabase Auth:', authErr.message);
+        }
+      }
     }
 
     const newMember = {
       id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       space_id: activeSpace.id,
+      user_id: authUserId || null,
       email: cleanEmail,
       full_name: fullName.trim() || cleanEmail.split('@')[0],
       role, // 'admin' | 'editor' | 'lector'
       joined_at: new Date().toISOString(),
       is_owner: false,
+      is_active: true,
+      assigned_password: password || null,
     };
 
     setMembers((prev) => [...prev, newMember]);
@@ -564,6 +710,29 @@ export function PersonalStudyProvider({ children }) {
     }
   };
 
+  const toggleStudyMemberActive = async (memberId) => {
+    if (!canManageMembers) throw new Error('No tienes permisos para cambiar el estado de colaboradores.');
+
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+    if (target.is_owner) throw new Error('No puedes desactivar al propietario principal.');
+
+    const nextActive = target.is_active === false ? true : false;
+
+    setMembers((prev) =>
+      prev.map((m) => (m.id === memberId ? { ...m, is_active: nextActive } : m))
+    );
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('study_members').update({ is_active: nextActive }).eq('id', memberId);
+        if (target.email) {
+          await supabase.from('profiles').update({ is_active: nextActive }).eq('email', target.email);
+        }
+      } catch (_) {}
+    }
+  };
+
   const removeStudyMember = async (memberId) => {
     if (!canManageMembers) throw new Error('No tienes permisos para retirar participantes.');
 
@@ -575,6 +744,9 @@ export function PersonalStudyProvider({ children }) {
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.from('study_members').delete().eq('id', memberId);
+        if (target?.email) {
+          await supabase.from('profiles').delete().eq('email', target.email);
+        }
       } catch (_) {}
     }
   };
@@ -621,6 +793,7 @@ export function PersonalStudyProvider({ children }) {
     // Métodos de Colaboradores
     inviteStudyMember,
     updateStudyMemberRole,
+    toggleStudyMemberActive,
     removeStudyMember,
     updateSpaceDetails,
   };

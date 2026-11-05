@@ -26,7 +26,12 @@ function NavigationSecurityGuard() {
     if (loading) return;
 
     if (currentUser && location.pathname === '/login') {
-      navigate('/', { replace: true });
+      const isStudyOnly = currentUser.role === 'colaborador_estudio';
+      if (isStudyOnly) {
+        navigate('/estudio-personal', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } else if (!currentUser && location.pathname !== '/login') {
       navigate('/login', { replace: true });
     }

@@ -78,9 +78,14 @@ export default function AuthPage() {
 
     try {
       if (mode === 'login') {
-        await login(sanitizedEmail, password);
+        const loginRes = await login(sanitizedEmail, password);
         setFailedAttempts(0);
-        navigate('/');
+
+        if (loginRes?.isStudyOnly || loginRes?.profile?.role === 'colaborador_estudio') {
+          navigate('/estudio-personal');
+        } else {
+          navigate('/');
+        }
       } else if (mode === 'recover') {
         await resetPassword(sanitizedEmail);
         setSuccessMsg(

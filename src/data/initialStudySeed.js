@@ -9,6 +9,9 @@ export const INITIAL_STUDY_SPACE = {
   description: 'Entorno privado e independiente para la planificación, avances y documentación académica.',
   academic_period: 'Semestre Actual / Ciclo Profesional',
   institution: 'Facultad de Ingeniería',
+  owner_id: 'usr-miguel-admin',
+  owner_name: 'Miguel Estrada torrente',
+  owner_email: 'miguelestrada@proyecto.com',
 };
 
 export const INITIAL_STUDY_ACTIVITIES = [

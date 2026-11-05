@@ -13,12 +13,12 @@ const offsetIso = (hoursAgo) => {
 export const INITIAL_PROFILES = [
   {
     id: 'usr-admin-01',
-    email: 'admin@nexuspm.dev',
-    full_name: 'Carlos Mendoza (Admin)',
+    email: 'miguelestrada@proyecto.com',
+    full_name: 'Miguel Estrada torrente',
     role: 'admin',
-    specialty: 'Administrador de Infraestructura & DevOps',
+    specialty: 'Administrador General de Plataforma & Líder del Proyecto',
     phone: '+57 300 111 2233',
-    github_username: 'cmendoza-admin',
+    github_username: 'MAET211',
     is_active: true,
     created_at: offsetIso(240),
   },

@@ -401,6 +401,11 @@ export function ProjectProvider({ children }) {
         }
 
         await fetchAllSupabaseData(data.user.id);
+        return {
+          ...data,
+          profile: prof,
+          isStudyOnly: prof?.role === 'colaborador_estudio',
+        };
       }
       return data;
     }
@@ -416,7 +421,11 @@ export function ProjectProvider({ children }) {
       throw new Error('Esta cuenta ha sido desactivada por el Administrador.');
     }
     setCurrentUser(found);
-    return { user: found };
+    return {
+      user: found,
+      profile: found,
+      isStudyOnly: found.role === 'colaborador_estudio',
+    };
   };
 
   const resetPassword = async (email) => {
