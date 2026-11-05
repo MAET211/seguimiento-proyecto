@@ -43,10 +43,9 @@ function NavigationSecurityGuard() {
     const handlePopState = () => {
       const currentHash = window.location.hash || '#/';
       if (currentUser && currentHash.startsWith('#/login')) {
-        // Evitar que con la flecha Atrás salte del Dashboard al Login teniendo sesión activa
-        navigate('/', { replace: true });
+        const isStudyOnly = currentUser?.role === 'colaborador_estudio';
+        navigate(isStudyOnly ? '/estudio-personal' : '/', { replace: true });
       } else if (!currentUser && !currentHash.startsWith('#/login')) {
-        // Evitar que con la flecha Atrás/Adelante salte del Login al Dashboard sin sesión
         navigate('/login', { replace: true });
       }
     };

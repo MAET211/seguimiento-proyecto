@@ -230,7 +230,7 @@ export function PersonalStudyProvider({ children }) {
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.id, ownerEmail, ownerFullName, ownerId, ownerName]);
+  }, [currentUser?.id, ownerEmail, ownerId, ownerName]);
 
   // ---------------------------------------------------------------------------
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
