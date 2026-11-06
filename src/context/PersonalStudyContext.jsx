@@ -253,9 +253,9 @@ export function PersonalStudyProvider({ children }) {
             supabase.from('study_members').select('*').eq('space_id', spaceData.id),
           ]);
 
-          if (actsRes.data && actsRes.data.length > 0) setActivities(actsRes.data);
-          if (advRes.data && advRes.data.length > 0) setAdvances(advRes.data);
-          if (docsRes.data && docsRes.data.length > 0) setDocuments(docsRes.data);
+          if (actsRes.data && !actsRes.error) setActivities(actsRes.data);
+          if (advRes.data && !advRes.error) setAdvances(advRes.data);
+          if (docsRes.data && !docsRes.error) setDocuments(docsRes.data);
 
           if (memsRes.data && memsRes.data.length > 0) {
             // Filtrar cualquier referencia residual a Carlos Mendoza
@@ -312,6 +312,71 @@ export function PersonalStudyProvider({ children }) {
       isMounted = false;
     };
   }, [currentUser?.id, ownerEmail, ownerId, ownerName]);
+
+  // Función para difundir eventos de estudio a todos los clientes conectados en tiempo real
+  const broadcastStudyEvent = useCallback((eventData) => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const channel = supabase.channel('nexus-study-live-sync');
+        channel.send({
+          type: 'broadcast',
+          event: 'study_sync',
+          payload: eventData,
+        });
+      } catch (_) {}
+    }
+  }, []);
+
+  // Escuchar difusiones en tiempo real entre colaboradores de estudio
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    const channel = supabase.channel('nexus-study-live-sync');
+    channel
+      .on('broadcast', { event: 'study_sync' }, ({ payload }) => {
+        if (!payload) return;
+        if (payload.type === 'DELETE_ACTIVITY') {
+          setActivities((prev) => prev.filter((a) => a.id !== payload.id));
+        } else if (payload.type === 'UPDATE_ACTIVITIES') {
+          setActivities(payload.activities);
+        } else if (payload.type === 'DELETE_ADVANCE') {
+          setAdvances((prev) => prev.filter((a) => a.id !== payload.id));
+          setDocuments((prev) => prev.filter((d) => d.advance_id !== payload.id));
+        } else if (payload.type === 'UPDATE_ADVANCES') {
+          setAdvances(payload.advances);
+        } else if (payload.type === 'DELETE_DOCUMENT') {
+          setDocuments((prev) => prev.filter((d) => d.id !== payload.id));
+        } else if (payload.type === 'UPDATE_DOCUMENTS') {
+          setDocuments(payload.documents);
+        } else if (payload.type === 'FULL_SYNC') {
+          if (Array.isArray(payload.activities)) setActivities(payload.activities);
+          if (Array.isArray(payload.advances)) setAdvances(payload.advances);
+          if (Array.isArray(payload.documents)) setDocuments(payload.documents);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Sincronización automática de LocalStorage entre pestañas abiertas en el mismo navegador
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === `${storageKey}_ACTIVITIES` && e.newValue) {
+        try { setActivities(JSON.parse(e.newValue)); } catch (_) {}
+      } else if (e.key === `${storageKey}_ADVANCES` && e.newValue) {
+        try { setAdvances(JSON.parse(e.newValue)); } catch (_) {}
+      } else if (e.key === `${storageKey}_DOCUMENTS` && e.newValue) {
+        try { setDocuments(JSON.parse(e.newValue)); } catch (_) {}
+      } else if (e.key === 'NEXUS_STUDY_MEMBERS_V4' && e.newValue) {
+        try { setMembers(JSON.parse(e.newValue)); } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [storageKey]);
 
   // ---------------------------------------------------------------------------
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
@@ -455,7 +520,11 @@ export function PersonalStudyProvider({ children }) {
       updated_at: new Date().toISOString(),
     };
 
-    setActivities((prev) => [newActivity, ...prev]);
+    setActivities((prev) => {
+      const updated = [newActivity, ...prev];
+      broadcastStudyEvent({ type: 'UPDATE_ACTIVITIES', activities: updated });
+      return updated;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -469,9 +538,11 @@ export function PersonalStudyProvider({ children }) {
     if (!canEditStudy) throw new Error('No tienes permisos de edición en este espacio de estudio.');
 
     const updatedTimestamp = new Date().toISOString();
-    setActivities((prev) =>
-      prev.map((a) => (a.id === activityId ? { ...a, ...updates, updated_at: updatedTimestamp } : a))
-    );
+    setActivities((prev) => {
+      const updated = prev.map((a) => (a.id === activityId ? { ...a, ...updates, updated_at: updatedTimestamp } : a));
+      broadcastStudyEvent({ type: 'UPDATE_ACTIVITIES', activities: updated });
+      return updated;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -486,7 +557,11 @@ export function PersonalStudyProvider({ children }) {
   const deleteStudyActivity = async (activityId) => {
     if (!canEditStudy) throw new Error('No tienes permisos para eliminar actividades.');
 
-    setActivities((prev) => prev.filter((a) => a.id !== activityId));
+    setActivities((prev) => {
+      const updated = prev.filter((a) => a.id !== activityId);
+      broadcastStudyEvent({ type: 'DELETE_ACTIVITY', id: activityId, activities: updated });
+      return updated;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -519,7 +594,11 @@ export function PersonalStudyProvider({ children }) {
       attachments_count: (advanceData.attachments || []).length,
     };
 
-    setAdvances((prev) => [newAdvance, ...prev]);
+    setAdvances((prev) => {
+      const updated = [newAdvance, ...prev];
+      broadcastStudyEvent({ type: 'UPDATE_ADVANCES', advances: updated });
+      return updated;
+    });
 
     // Si incluyó archivos adjuntos en el formulario de creación, registrarlos
     if (advanceData.attachments && advanceData.attachments.length > 0) {
@@ -544,9 +623,11 @@ export function PersonalStudyProvider({ children }) {
     if (!canEditStudy) throw new Error('No tienes permisos para modificar avances.');
 
     const updatedTimestamp = new Date().toISOString();
-    setAdvances((prev) =>
-      prev.map((adv) => (adv.id === advanceId ? { ...adv, ...updates, updated_at: updatedTimestamp } : adv))
-    );
+    setAdvances((prev) => {
+      const updated = prev.map((adv) => (adv.id === advanceId ? { ...adv, ...updates, updated_at: updatedTimestamp } : adv));
+      broadcastStudyEvent({ type: 'UPDATE_ADVANCES', advances: updated });
+      return updated;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -561,9 +642,17 @@ export function PersonalStudyProvider({ children }) {
   const deleteStudyAdvance = async (advanceId) => {
     if (!canEditStudy) throw new Error('No tienes permisos para eliminar avances.');
 
-    setAdvances((prev) => prev.filter((a) => a.id !== advanceId));
+    setAdvances((prev) => {
+      const updated = prev.filter((a) => a.id !== advanceId);
+      broadcastStudyEvent({ type: 'DELETE_ADVANCE', id: advanceId, advances: updated });
+      return updated;
+    });
     // Eliminar también documentos vinculados
-    setDocuments((prev) => prev.filter((d) => d.advance_id !== advanceId));
+    setDocuments((prev) => {
+      const updatedDocs = prev.filter((d) => d.advance_id !== advanceId);
+      broadcastStudyEvent({ type: 'UPDATE_DOCUMENTS', documents: updatedDocs });
+      return updatedDocs;
+    });
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -576,8 +665,8 @@ export function PersonalStudyProvider({ children }) {
   const toggleAdvanceChecklistItem = async (advanceId, itemId) => {
     if (!canEditStudy) return;
 
-    setAdvances((prev) =>
-      prev.map((adv) => {
+    setAdvances((prev) => {
+      const updated = prev.map((adv) => {
         if (adv.id !== advanceId) return adv;
         const nextList = (adv.tasks_checklist || []).map((item) =>
           item.id === itemId ? { ...item, completed: !item.completed } : item
@@ -592,8 +681,10 @@ export function PersonalStudyProvider({ children }) {
           status: newStatus,
           updated_at: new Date().toISOString(),
         };
-      })
-    );
+      });
+      broadcastStudyEvent({ type: 'UPDATE_ADVANCES', advances: updated });
+      return updated;
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -619,7 +710,11 @@ export function PersonalStudyProvider({ children }) {
       created_at: new Date().toISOString(),
     };
 
-    setDocuments((prev) => [newDoc, ...prev]);
+    setDocuments((prev) => {
+      const updated = [newDoc, ...prev];
+      broadcastStudyEvent({ type: 'UPDATE_DOCUMENTS', documents: updated });
+      return updated;
+    });
 
     // Actualizar contador en el avance
     if (newDoc.advance_id) {
@@ -645,7 +740,11 @@ export function PersonalStudyProvider({ children }) {
     if (!canEditStudy) throw new Error('No tienes permisos para eliminar documentos.');
 
     const targetDoc = documents.find((d) => d.id === docId);
-    setDocuments((prev) => prev.filter((d) => d.id !== docId));
+    setDocuments((prev) => {
+      const updated = prev.filter((d) => d.id !== docId);
+      broadcastStudyEvent({ type: 'DELETE_DOCUMENT', id: docId, documents: updated });
+      return updated;
+    });
 
     if (targetDoc?.advance_id) {
       setAdvances((prev) =>
