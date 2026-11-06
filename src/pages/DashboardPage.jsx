@@ -38,7 +38,9 @@ export default function DashboardPage() {
 
   const leaderProfile =
     profiles.find((p) => p.id === project?.leader_id) ||
-    profiles.find((p) => p.role === 'lider');
+    profiles.find((p) => p.role === 'admin') ||
+    profiles.find((p) => p.role === 'lider') ||
+    profiles.find((p) => p.email?.toLowerCase() === 'miguelestrada@proyecto.com');
 
   // Próximas fechas de entrega (tareas no completadas ordenadas por due_date ascendente)
   const upcomingDeliverables = [...tasks]
@@ -111,7 +113,7 @@ export default function DashboardPage() {
                 <Award className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 Líder del Proyecto:{' '}
                 <strong className="text-slate-900 dark:text-white">
-                  {leaderProfile?.full_name || 'Dra. Elena Vargas'}
+                  {leaderProfile?.full_name || 'Miguel Estrada torrente'}
                 </strong>
               </span>
               <span className="flex items-center gap-1.5">

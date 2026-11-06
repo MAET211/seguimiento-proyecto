@@ -57,7 +57,16 @@ export function ProjectProvider({ children }) {
   const [syncError, setSyncError] = useState(null);
 
   // Estado de todas las entidades del proyecto
-  const [profiles, setProfiles] = useState(isSupabaseConfigured ? [] : INITIAL_PROFILES);
+  const [profiles, setProfiles] = useState(() => {
+    try {
+      const cached = localStorage.getItem('NEXUS_PROFILES_CACHE');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return isSupabaseConfigured ? [] : INITIAL_PROFILES;
+  });
   const [invitations, setInvitations] = useState(isSupabaseConfigured ? [] : INITIAL_INVITATIONS);
   const [project, setProject] = useState(isSupabaseConfigured ? null : INITIAL_PROJECT);
   const [projectMembers, setProjectMembers] = useState(
@@ -139,6 +148,9 @@ export function ProjectProvider({ children }) {
       }
 
       setProfiles(loadedProfiles);
+      try {
+        localStorage.setItem('NEXUS_PROFILES_CACHE', JSON.stringify(loadedProfiles));
+      } catch (_) {}
       setInvitations(invitationsRes.data || []);
 
       const myProfile = activeUserId
@@ -278,6 +290,27 @@ export function ProjectProvider({ children }) {
       supabase.removeChannel(realtimeChannel);
     };
   }, [fetchAllSupabaseData]);
+
+  // Sincronización en tiempo real de perfiles entre pestañas y sesiones
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'NEXUS_PROFILES_CACHE' && e.newValue) {
+        try {
+          const updated = JSON.parse(e.newValue);
+          if (Array.isArray(updated) && updated.length > 0) {
+            setProfiles(updated);
+            if (currentUser?.id) {
+              const myUpdated = updated.find((p) => p.id === currentUser.id);
+              if (myUpdated) setCurrentUser(myUpdated);
+            }
+          }
+        } catch (_) {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [currentUser?.id]);
 
   // ---------------------------------------------------------------------------
   // TRAZABILIDAD AUTOMÁTICA Y NOTIFICACIONES
@@ -543,6 +576,8 @@ export function ProjectProvider({ children }) {
   // ---------------------------------------------------------------------------
   const updateMyProfile = async (updates) => {
     if (!currentUser) return;
+    let updatedUser = { ...currentUser, ...updates };
+
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from('profiles')
@@ -550,22 +585,71 @@ export function ProjectProvider({ children }) {
         .eq('id', currentUser.id)
         .select()
         .single();
-      if (error) throw error;
-      setProfiles((prev) => prev.map((p) => (p.id === currentUser.id ? data : p)));
-      setCurrentUser(data);
-      return data;
+      if (!error && data) {
+        updatedUser = data;
+      }
+
+      // Si el usuario es el administrador principal o líder, propagar sincronización a estudio
+      if (
+        currentUser.role === 'admin' ||
+        currentUser.role === 'lider' ||
+        currentUser.email?.toLowerCase().includes('miguel')
+      ) {
+        try {
+          if (updatedUser.full_name) {
+            await supabase
+              .from('study_members')
+              .update({ full_name: updatedUser.full_name })
+              .or(`is_owner.eq.true,email.ilike.${currentUser.email}`);
+
+            await supabase
+              .from('study_spaces')
+              .update({ owner_name: updatedUser.full_name })
+              .eq('owner_id', currentUser.id);
+          }
+        } catch (studyErr) {
+          console.warn('Sincronización en tablas de estudio:', studyErr);
+        }
+      }
     }
 
-    const updated = { ...currentUser, ...updates };
-    setProfiles((prev) => prev.map((p) => (p.id === currentUser.id ? updated : p)));
-    setCurrentUser(updated);
-    return updated;
+    setProfiles((prev) => prev.map((p) => (p.id === currentUser.id ? updatedUser : p)));
+    setCurrentUser(updatedUser);
+
+    // Guardar en caché local para persistencia y sincronización entre pestañas / sesiones
+    try {
+      const savedProfiles = JSON.parse(localStorage.getItem('NEXUS_PROFILES_CACHE') || '[]');
+      const newProfiles = (savedProfiles.length > 0 ? savedProfiles : profiles).map((p) =>
+        p.id === currentUser.id ? updatedUser : p
+      );
+      localStorage.setItem('NEXUS_PROFILES_CACHE', JSON.stringify(newProfiles));
+
+      // Sincronizar en study_members de localStorage
+      const v4Members = JSON.parse(localStorage.getItem('NEXUS_STUDY_MEMBERS_V4') || '[]');
+      if (v4Members.length > 0) {
+        const updatedV4 = v4Members.map((m) =>
+          m.is_owner || m.email?.toLowerCase() === currentUser.email?.toLowerCase()
+            ? { ...m, full_name: updatedUser.full_name }
+            : m
+        );
+        localStorage.setItem('NEXUS_STUDY_MEMBERS_V4', JSON.stringify(updatedV4));
+      }
+
+      const v4Space = JSON.parse(localStorage.getItem('NEXUS_STUDY_SPACE_V4') || 'null');
+      if (v4Space) {
+        v4Space.owner_name = updatedUser.full_name;
+        localStorage.setItem('NEXUS_STUDY_SPACE_V4', JSON.stringify(v4Space));
+      }
+    } catch (_) {}
+
+    return updatedUser;
   };
 
   const adminUpdateUser = async (userId, updates) => {
     if (!isLeaderOrAdmin) {
       throw new Error('Permiso denegado: solo el Líder o Administrador puede modificar roles o estados.');
     }
+    let updatedData = null;
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from('profiles')
@@ -574,15 +658,24 @@ export function ProjectProvider({ children }) {
         .select()
         .single();
       if (error) throw error;
-      setProfiles((prev) => prev.map((p) => (p.id === userId ? data : p)));
-      if (currentUser?.id === userId) setCurrentUser(data);
-      return data;
+      updatedData = data;
+    } else {
+      const prevUser = profiles.find((p) => p.id === userId) || {};
+      updatedData = { ...prevUser, ...updates };
     }
 
-    setProfiles((prev) => prev.map((p) => (p.id === userId ? { ...p, ...updates } : p)));
-    if (currentUser?.id === userId) {
-      setCurrentUser((prev) => ({ ...prev, ...updates }));
-    }
+    setProfiles((prev) => prev.map((p) => (p.id === userId ? updatedData : p)));
+    if (currentUser?.id === userId) setCurrentUser(updatedData);
+
+    try {
+      const savedProfiles = JSON.parse(localStorage.getItem('NEXUS_PROFILES_CACHE') || '[]');
+      const newProfiles = (savedProfiles.length > 0 ? savedProfiles : profiles).map((p) =>
+        p.id === userId ? updatedData : p
+      );
+      localStorage.setItem('NEXUS_PROFILES_CACHE', JSON.stringify(newProfiles));
+    } catch (_) {}
+
+    return updatedData;
   };
 
   const deleteUser = async (userId) => {

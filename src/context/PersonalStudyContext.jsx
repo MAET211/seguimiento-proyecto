@@ -21,13 +21,43 @@ export const usePersonalStudy = () => {
 };
 
 export function PersonalStudyProvider({ children }) {
-  const { currentUser, project } = useProject();
+  const { currentUser, project, profiles } = useProject();
 
   const storageKey = 'NEXUS_STUDY_DATA_V4';
 
-  const ownerName = currentUser?.full_name || 'Miguel Estrada torrente';
-  const ownerEmail = currentUser?.email || 'miguelestrada@proyecto.com';
-  const ownerId = currentUser?.id || 'usr-miguel-admin';
+  // Localizar el perfil del Administrador Principal / Líder de la plataforma
+  const platformAdmin = useMemo(() => {
+    return (
+      profiles?.find(
+        (p) =>
+          p.email?.toLowerCase() === 'miguelestrada@proyecto.com' ||
+          (p.role === 'admin' && p.email?.toLowerCase().includes('miguel')) ||
+          p.id === project?.leader_id ||
+          p.role === 'admin'
+      ) || null
+    );
+  }, [profiles, project?.leader_id]);
+
+  // Si currentUser es el Administrador o Líder, usamos su perfil en tiempo real;
+  // de lo contrario (ej. colaboradores o integrantes), usamos el perfil del Administrador (Miguel)
+  const isCurrentUserAdmin = Boolean(
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'lider' ||
+    currentUser?.email?.toLowerCase() === 'miguelestrada@proyecto.com' ||
+    (project?.leader_id && currentUser?.id === project.leader_id)
+  );
+
+  const ownerProfile = isCurrentUserAdmin
+    ? currentUser
+    : platformAdmin || {
+        id: 'usr-admin-01',
+        full_name: 'Miguel Estrada torrente',
+        email: 'miguelestrada@proyecto.com',
+      };
+
+  const ownerName = ownerProfile?.full_name || 'Miguel Estrada torrente';
+  const ownerEmail = 'miguelestrada@proyecto.com';
+  const ownerId = ownerProfile?.id || 'usr-admin-01';
 
   // Estado del espacio de estudio (El propietario legítimo es Miguel Estrada torrente)
   const [activeSpace, setActiveSpace] = useState(() => {
@@ -60,12 +90,12 @@ export function PersonalStudyProvider({ children }) {
 
         // Asegurar que Miguel Estrada torrente sea el propietario principal
         const hasOwner = filtered.some(
-          (m) => m.is_owner || m.email?.toLowerCase() === ownerEmail.toLowerCase()
+          (m) => m.is_owner || m.email?.toLowerCase() === 'miguelestrada@proyecto.com'
         );
 
         if (hasOwner) {
           return filtered.map((m) =>
-            m.is_owner || m.email?.toLowerCase() === ownerEmail.toLowerCase()
+            m.is_owner || m.email?.toLowerCase() === 'miguelestrada@proyecto.com'
               ? {
                   ...m,
                   user_id: ownerId,
@@ -119,6 +149,40 @@ export function PersonalStudyProvider({ children }) {
     ];
   });
 
+  // Sincronizar el nombre y datos del propietario si el administrador actualiza su perfil
+  useEffect(() => {
+    if (!ownerName) return;
+
+    setActiveSpace((prev) => {
+      if (prev && (prev.owner_name !== ownerName || prev.owner_email !== ownerEmail)) {
+        return { ...prev, owner_name: ownerName, owner_email: ownerEmail };
+      }
+      return prev;
+    });
+
+    setMembers((prev) => {
+      let changed = false;
+      const updated = prev.map((m) => {
+        if (m.is_owner || m.email?.toLowerCase() === 'miguelestrada@proyecto.com') {
+          if (m.full_name !== ownerName || m.email !== ownerEmail) {
+            changed = true;
+            return {
+              ...m,
+              full_name: ownerName,
+              email: ownerEmail,
+              user_id: ownerId,
+              role: 'admin',
+              is_owner: true,
+              is_active: true,
+            };
+          }
+        }
+        return m;
+      });
+      return changed ? updated : prev;
+    });
+  }, [ownerName, ownerEmail, ownerId]);
+
   // Actividades del cronograma académico
   const [activities, setActivities] = useState(() => {
     try {
@@ -164,13 +228,20 @@ export function PersonalStudyProvider({ children }) {
     let isMounted = true;
     async function loadFromSupabase() {
       try {
-        const { data: spaceData, error: spaceErr } = await supabase
-          .from('study_spaces')
-          .select('*')
-          .eq('owner_id', currentUser.id)
-          .maybeSingle();
+        let spaceData = null;
+        if (isCurrentUserAdmin) {
+          const { data } = await supabase
+            .from('study_spaces')
+            .select('*')
+            .eq('owner_id', currentUser.id)
+            .maybeSingle();
+          spaceData = data;
+        }
 
-        if (spaceErr) return;
+        if (!spaceData) {
+          const { data } = await supabase.from('study_spaces').select('*').limit(1).maybeSingle();
+          spaceData = data;
+        }
 
         if (spaceData && isMounted) {
           setActiveSpace(spaceData);

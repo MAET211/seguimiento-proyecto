@@ -89,7 +89,7 @@ export const INITIAL_PROJECT = {
     'Plataforma web distribuida para la gestión de procesos académicos, seguimiento de proyectos de investigación, analítica en tiempo real y despliegue automatizado mediante arquitectura Serverless con Supabase y GitHub Pages.',
   objectives:
     '1. Digitalizar el 100% del flujo de seguimiento y entregas del equipo.\n2. Garantizar trazabilidad de commits, PRs y evidencias por tarea.\n3. Cumplir con el cronograma de 4 fases con seguridad RLS en PostgreSQL.',
-  leader_id: 'usr-lider-01',
+  leader_id: 'usr-admin-01',
   start_date: offsetDate(-20),
   end_date: offsetDate(45),
   status: 'en_ejecucion',
@@ -103,8 +103,8 @@ export const INITIAL_PROJECT_MEMBERS = [
   {
     id: 'pm-01',
     project_id: 'prj-main-01',
-    user_id: 'usr-lider-01',
-    project_role: 'Líder Técnico & Product Owner',
+    user_id: 'usr-admin-01',
+    project_role: 'Líder del Proyecto & Administrador General',
     responsibilities: 'Arquitectura general, planificación del cronograma Gantt, asignación y revisión/aprobación de entregables.',
     weekly_hours: 30,
   },
