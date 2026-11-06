@@ -23,7 +23,67 @@ export const usePersonalStudy = () => {
 export function PersonalStudyProvider({ children }) {
   const { currentUser, project, profiles } = useProject();
 
-  const storageKey = 'NEXUS_STUDY_DATA_V4';
+  // Versión de almacenamiento aislada y limpia (V5)
+  const storageKey = 'NEXUS_STUDY_DATA_V5';
+
+  // Función de saneamiento riguroso para depurar datos residuales de prueba
+  const purgeLegacyMockItems = useCallback((list) => {
+    if (!Array.isArray(list)) return [];
+    return list.filter((item) => {
+      if (!item || !item.id) return false;
+      const id = String(item.id).toLowerCase();
+      const title = String(item.title || item.name || '').toLowerCase();
+      if (
+        id.startsWith('act-std-00') ||
+        id.startsWith('adv-std-00') ||
+        id.startsWith('doc-std-00') ||
+        id === 'act-std-001' ||
+        id === 'act-std-002' ||
+        id === 'act-std-003' ||
+        id === 'act-std-004' ||
+        id === 'adv-std-001' ||
+        id === 'adv-std-002' ||
+        id === 'doc-std-001' ||
+        id === 'doc-std-002' ||
+        id === 'doc-std-003'
+      ) {
+        return false;
+      }
+      if (
+        title.includes('estudio de patrones de microservicios') ||
+        title.includes('modelado relacional y políticas rls') ||
+        title.includes('revisión bibliográfica de rag') ||
+        title.includes('redacción del capítulo de estado del arte') ||
+        title.includes('análisis comparativo de motores de persistencia') ||
+        title.includes('síntesis bibliográfica sobre patrones arquitectónicos') ||
+        title.includes('guia_diseno_políticas_rls') ||
+        title.includes('reporte_matriz_microservicios') ||
+        title.includes('plan_trabajo_academico_sintesis')
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, []);
+
+  // Limpiar cachés y claves locales de versiones anteriores (V1 a V4)
+  useEffect(() => {
+    try {
+      const keysToPurge = [
+        'NEXUS_STUDY_DATA_V4_ACTIVITIES',
+        'NEXUS_STUDY_DATA_V4_ADVANCES',
+        'NEXUS_STUDY_DATA_V4_DOCUMENTS',
+        'NEXUS_STUDY_DATA_V3_ACTIVITIES',
+        'NEXUS_STUDY_DATA_V3_ADVANCES',
+        'NEXUS_STUDY_DATA_V3_DOCUMENTS',
+        'NEXUS_STUDY_DATA_V2_ACTIVITIES',
+        'NEXUS_STUDY_DATA_V2_ADVANCES',
+        'NEXUS_STUDY_DATA_V2_DOCUMENTS',
+        'NEXUS_STUDY_DATA_V1_ACTIVITIES',
+      ];
+      keysToPurge.forEach((k) => localStorage.removeItem(k));
+    } catch (_) {}
+  }, []);
 
   // Localizar el perfil del Administrador Principal / Líder de la plataforma
   const platformAdmin = useMemo(() => {
@@ -183,31 +243,31 @@ export function PersonalStudyProvider({ children }) {
     });
   }, [ownerName, ownerEmail, ownerId]);
 
-  // Actividades del cronograma académico
+  // Actividades del cronograma académico (limpias y sin datos semilla obsoletos)
   const [activities, setActivities] = useState(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_ACTIVITIES`);
-      if (saved) return JSON.parse(saved);
+      if (saved) return purgeLegacyMockItems(JSON.parse(saved));
     } catch (_) {}
-    return INITIAL_STUDY_ACTIVITIES;
+    return [];
   });
 
   // Avances académicos
   const [advances, setAdvances] = useState(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_ADVANCES`);
-      if (saved) return JSON.parse(saved);
+      if (saved) return purgeLegacyMockItems(JSON.parse(saved));
     } catch (_) {}
-    return INITIAL_STUDY_ADVANCES;
+    return [];
   });
 
   // Documentos y recursos adjuntos
   const [documents, setDocuments] = useState(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_DOCUMENTS`);
-      if (saved) return JSON.parse(saved);
+      if (saved) return purgeLegacyMockItems(JSON.parse(saved));
     } catch (_) {}
-    return INITIAL_STUDY_DOCUMENTS;
+    return [];
   });
 
   // Sincronización en LocalStorage para garantizar disponibilidad continua
@@ -253,9 +313,15 @@ export function PersonalStudyProvider({ children }) {
             supabase.from('study_members').select('*').eq('space_id', spaceData.id),
           ]);
 
-          if (actsRes.data && !actsRes.error) setActivities(actsRes.data);
-          if (advRes.data && !advRes.error) setAdvances(advRes.data);
-          if (docsRes.data && !docsRes.error) setDocuments(docsRes.data);
+          if (actsRes.data && !actsRes.error) {
+            setActivities(purgeLegacyMockItems(actsRes.data));
+          }
+          if (advRes.data && !advRes.error) {
+            setAdvances(purgeLegacyMockItems(advRes.data));
+          }
+          if (docsRes.data && !docsRes.error) {
+            setDocuments(purgeLegacyMockItems(docsRes.data));
+          }
 
           if (memsRes.data && memsRes.data.length > 0) {
             // Filtrar cualquier referencia residual a Carlos Mendoza
@@ -308,10 +374,29 @@ export function PersonalStudyProvider({ children }) {
     }
 
     loadFromSupabase();
+
+    // Suscripción Realtime a cambios en tablas PostgreSQL de estudio si existen
+    const dbChangesChannel = supabase
+      .channel('nexus-study-db-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'study_schedule_activities' }, () => {
+        loadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'study_advances' }, () => {
+        loadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'study_documents' }, () => {
+        loadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'study_members' }, () => {
+        loadFromSupabase();
+      })
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(dbChangesChannel);
     };
-  }, [currentUser?.id, ownerEmail, ownerId, ownerName]);
+  }, [currentUser?.id, ownerEmail, ownerId, ownerName, purgeLegacyMockItems, isCurrentUserAdmin]);
 
   // Función para difundir eventos de estudio a todos los clientes conectados en tiempo real
   const broadcastStudyEvent = useCallback((eventData) => {
@@ -327,7 +412,7 @@ export function PersonalStudyProvider({ children }) {
     }
   }, []);
 
-  // Escuchar difusiones en tiempo real entre colaboradores de estudio
+  // Escuchar difusiones en tiempo real entre colaboradores de estudio y atender peticiones de sincronización
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
@@ -338,45 +423,68 @@ export function PersonalStudyProvider({ children }) {
         if (payload.type === 'DELETE_ACTIVITY') {
           setActivities((prev) => prev.filter((a) => a.id !== payload.id));
         } else if (payload.type === 'UPDATE_ACTIVITIES') {
-          setActivities(payload.activities);
+          setActivities(purgeLegacyMockItems(payload.activities));
         } else if (payload.type === 'DELETE_ADVANCE') {
           setAdvances((prev) => prev.filter((a) => a.id !== payload.id));
           setDocuments((prev) => prev.filter((d) => d.advance_id !== payload.id));
         } else if (payload.type === 'UPDATE_ADVANCES') {
-          setAdvances(payload.advances);
+          setAdvances(purgeLegacyMockItems(payload.advances));
         } else if (payload.type === 'DELETE_DOCUMENT') {
           setDocuments((prev) => prev.filter((d) => d.id !== payload.id));
         } else if (payload.type === 'UPDATE_DOCUMENTS') {
-          setDocuments(payload.documents);
+          setDocuments(purgeLegacyMockItems(payload.documents));
         } else if (payload.type === 'FULL_SYNC') {
-          if (Array.isArray(payload.activities)) setActivities(payload.activities);
-          if (Array.isArray(payload.advances)) setAdvances(payload.advances);
-          if (Array.isArray(payload.documents)) setDocuments(payload.documents);
+          if (Array.isArray(payload.activities)) setActivities(purgeLegacyMockItems(payload.activities));
+          if (Array.isArray(payload.advances)) setAdvances(purgeLegacyMockItems(payload.advances));
+          if (Array.isArray(payload.documents)) setDocuments(purgeLegacyMockItems(payload.documents));
         }
       })
-      .subscribe();
+      .on('broadcast', { event: 'study_request_state' }, () => {
+        // Cuando un colaborador se conecta, el administrador responde con el estado real actual
+        channel.send({
+          type: 'broadcast',
+          event: 'study_sync',
+          payload: {
+            type: 'FULL_SYNC',
+            activities,
+            advances,
+            documents,
+            members,
+          },
+        });
+      })
+      .subscribe((status) => {
+        // Al conectarse como colaborador, solicitar inmediatamente el estado más reciente
+        if (status === 'SUBSCRIBED') {
+          channel.send({
+            type: 'broadcast',
+            event: 'study_request_state',
+            payload: { email: currentUser?.email },
+          });
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activities, advances, documents, members, currentUser?.email, purgeLegacyMockItems]);
 
   // Sincronización automática de LocalStorage entre pestañas abiertas en el mismo navegador
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key === `${storageKey}_ACTIVITIES` && e.newValue) {
-        try { setActivities(JSON.parse(e.newValue)); } catch (_) {}
+        try { setActivities(purgeLegacyMockItems(JSON.parse(e.newValue))); } catch (_) {}
       } else if (e.key === `${storageKey}_ADVANCES` && e.newValue) {
-        try { setAdvances(JSON.parse(e.newValue)); } catch (_) {}
+        try { setAdvances(purgeLegacyMockItems(JSON.parse(e.newValue))); } catch (_) {}
       } else if (e.key === `${storageKey}_DOCUMENTS` && e.newValue) {
-        try { setDocuments(JSON.parse(e.newValue)); } catch (_) {}
+        try { setDocuments(purgeLegacyMockItems(JSON.parse(e.newValue))); } catch (_) {}
       } else if (e.key === 'NEXUS_STUDY_MEMBERS_V4' && e.newValue) {
         try { setMembers(JSON.parse(e.newValue)); } catch (_) {}
       }
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [storageKey]);
+  }, [storageKey, purgeLegacyMockItems]);
 
   // ---------------------------------------------------------------------------
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
