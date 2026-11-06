@@ -20,6 +20,13 @@ import {
   BellRing,
   Mail,
   ShieldCheck,
+  Upload,
+  Download,
+  FileText,
+  Paperclip,
+  FileCode,
+  Eye,
+  File,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import {
@@ -29,6 +36,438 @@ import {
   formatDateTime,
   getInitials,
 } from '../utils/formatters';
+
+function formatFileSize(bytes) {
+  if (!bytes || isNaN(bytes)) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileExtension(name = '') {
+  const parts = (name || '').split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : '';
+}
+
+function decodeBase64Text(dataUrl = '') {
+  try {
+    const base64 = dataUrl.split(',')[1] || '';
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (m) => m.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (e) {
+    return 'No fue posible previsualizar el contenido en texto plano.';
+  }
+}
+
+function getDeliverableBadgeInfo(ev) {
+  const name = ev.file_name || ev.title || ev.evidence_url || '';
+  const ext = (ev.file_extension || getFileExtension(name)).toLowerCase();
+  const url = ev.evidence_url || ev.data_url || '';
+  const isDataUrl = url.startsWith('data:');
+
+  if (['doc', 'docx'].includes(ext)) {
+    return {
+      label: ext.toUpperCase(),
+      bg: 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+      isDownloadable: true,
+    };
+  }
+  if (ext === 'pdf') {
+    return {
+      label: 'PDF',
+      bg: 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+      isPdf: true,
+      isDownloadable: true,
+      canViewInline: true,
+    };
+  }
+  if (['md', 'markdown'].includes(ext)) {
+    return {
+      label: 'MD',
+      bg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+      isMarkdown: true,
+      isDownloadable: true,
+      canViewInline: true,
+    };
+  }
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+    return {
+      label: ext.toUpperCase(),
+      bg: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+      isDownloadable: true,
+    };
+  }
+  if (['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif'].includes(ext)) {
+    return {
+      label: 'IMG',
+      bg: 'bg-purple-100 text-purple-700 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+      isDownloadable: true,
+      canViewInline: true,
+    };
+  }
+  if (['txt', 'csv', 'json'].includes(ext)) {
+    return {
+      label: ext.toUpperCase(),
+      bg: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700',
+      isDownloadable: true,
+      canViewInline: true,
+    };
+  }
+  return {
+    label: ev.evidence_type === 'pull_request' ? 'PR' : ev.evidence_type === 'commit' ? 'GIT' : 'URL',
+    bg: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+    isDownloadable: isDataUrl,
+    canViewInline: false,
+  };
+}
+
+function DeliverableEvidenceItem({ ev, onPreviewText }) {
+  const badge = getDeliverableBadgeInfo(ev);
+  const url = ev.evidence_url || ev.data_url || '';
+  const isDataUrl = url.startsWith('data:');
+  const fileName = ev.file_name || ev.title || (isDataUrl ? 'documento' : 'enlace');
+
+  return (
+    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          className={`px-1.5 py-0.5 text-[9px] font-black uppercase rounded-md border tracking-wider shrink-0 ${badge.bg}`}
+        >
+          {badge.label}
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate" title={fileName}>
+            {ev.title || fileName}
+          </p>
+          {(ev.file_size || ev.file_name) && (
+            <p className="text-[10px] text-slate-400 truncate">
+              {ev.file_name ? ev.file_name : ''}
+              {ev.file_size ? ` • ${ev.file_size}` : ''}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1 shrink-0">
+        {(badge.isMarkdown || badge.canViewInline) && isDataUrl && onPreviewText && (
+          <button
+            type="button"
+            onClick={() => onPreviewText(ev)}
+            className="p-1 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800"
+            title="Previsualizar archivo"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {!isDataUrl && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="p-1 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800"
+            title="Abrir enlace externo"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        )}
+
+        {isDataUrl && (
+          <a
+            href={url}
+            download={fileName}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-[11px] font-bold transition-colors"
+            title={`Descargar ${fileName}`}
+          >
+            <Download className="w-3 h-3" />
+            <span>Descargar</span>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeliverableFilesUploader({ stagedEvidences, setStagedEvidences }) {
+  const [activeTab, setActiveTab] = useState('files');
+  const [urlTitle, setUrlTitle] = useState('');
+  const [urlType, setUrlType] = useState('pull_request');
+  const [urlValue, setUrlValue] = useState('');
+  const [reading, setReading] = useState(false);
+
+  const handleFileSelect = async (e) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length === 0) return;
+    setReading(true);
+
+    try {
+      const readPromises = selectedFiles.map((file) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const ext = getFileExtension(file.name);
+            resolve({
+              id: `ev-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+              title: file.name,
+              file_name: file.name,
+              file_size: formatFileSize(file.size),
+              file_extension: ext,
+              evidence_url: reader.result,
+              evidence_type: 'documento',
+              created_at: new Date().toISOString(),
+            });
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
+        });
+      });
+
+      const results = await Promise.all(readPromises);
+      const validResults = results.filter(Boolean);
+      setStagedEvidences((prev) => [...prev, ...validResults]);
+    } finally {
+      setReading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAddUrl = (e) => {
+    e.preventDefault();
+    if (!urlValue.trim()) return;
+    const newLinkEv = {
+      id: `ev-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      title: urlTitle.trim() || urlValue,
+      evidence_url: urlValue.trim(),
+      evidence_type: urlType,
+      file_name: '',
+      file_size: '',
+      file_extension: '',
+      created_at: new Date().toISOString(),
+    };
+    setStagedEvidences((prev) => [...prev, newLinkEv]);
+    setUrlTitle('');
+    setUrlValue('');
+  };
+
+  const handleRemove = (id) => {
+    setStagedEvidences((prev) => prev.filter((ev) => ev.id !== id));
+  };
+
+  const handleTitleChange = (id, newTitle) => {
+    setStagedEvidences((prev) =>
+      prev.map((ev) => (ev.id === id ? { ...ev, title: newTitle } : ev))
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
+        <button
+          type="button"
+          onClick={() => setActiveTab('files')}
+          className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+            activeTab === 'files'
+              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span>Subir Archivos (Word, PDF, MD, Zip...)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('link')}
+          className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+            activeTab === 'link'
+              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+        >
+          <Link2 className="w-3.5 h-3.5" />
+          <span>Enlace Web (PR / Commit / Drive)</span>
+        </button>
+      </div>
+
+      {activeTab === 'files' ? (
+        <div>
+          <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-200 dark:border-indigo-900/60 hover:border-indigo-400 dark:hover:border-indigo-600 rounded-xl bg-indigo-50/20 dark:bg-indigo-950/10 cursor-pointer transition-colors group">
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.md,.txt,.zip,.rar,.png,.jpg,.jpeg,.xlsx,.pptx"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <div className="w-9 h-9 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+              <Upload className="w-4 h-4" />
+            </div>
+            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              {reading ? 'Cargando y procesando archivos...' : 'Haz clic para seleccionar o arrastra archivos aquí'}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center mt-0.5">
+              Word (.doc, .docx), PDF (.pdf), Markdown (.md), comprimidos (.zip) o imágenes
+            </p>
+          </label>
+        </div>
+      ) : (
+        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Título del Enlace
+              </label>
+              <input
+                type="text"
+                placeholder="Ej: Pull Request #24 / Demo en línea"
+                value={urlTitle}
+                onChange={(e) => setUrlTitle(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Tipo
+              </label>
+              <select
+                value={urlType}
+                onChange={(e) => setUrlType(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+              >
+                <option value="pull_request">Pull Request (GitHub)</option>
+                <option value="commit">Commit en Repositorio</option>
+                <option value="documento">Documento Técnico</option>
+                <option value="despliegue">URL de Despliegue</option>
+                <option value="enlace">Otro Enlace</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              URL del Entregable
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                placeholder="https://github.com/... o https://drive.google.com/..."
+                value={urlValue}
+                onChange={(e) => setUrlValue(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+              />
+              <button
+                type="button"
+                onClick={handleAddUrl}
+                disabled={!urlValue.trim()}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stagedEvidences.length > 0 && (
+        <div className="space-y-1.5 pt-1">
+          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
+            Entregables seleccionados ({stagedEvidences.length}):
+          </span>
+          <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+            {stagedEvidences.map((ev, idx) => {
+              const badge = getDeliverableBadgeInfo(ev);
+              return (
+                <div
+                  key={ev.id || idx}
+                  className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs"
+                >
+                  <span
+                    className={`px-1.5 py-0.5 text-[9px] font-black uppercase rounded border shrink-0 ${badge.bg}`}
+                  >
+                    {badge.label}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={ev.title}
+                      onChange={(e) => handleTitleChange(ev.id, e.target.value)}
+                      placeholder="Nombre del entregable..."
+                      className="w-full px-2 py-1 text-xs rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-medium"
+                      title="Haz clic para personalizar el nombre del entregable"
+                    />
+                    {ev.file_size && (
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        {ev.file_name} • {ev.file_size}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(ev.id)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 shrink-0"
+                    title="Eliminar este entregable"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MarkdownPreviewModal({ doc, onClose }) {
+  if (!doc) return null;
+  const isDataUrl = (doc.evidence_url || '').startsWith('data:');
+  const textContent = isDataUrl ? decodeBase64Text(doc.evidence_url) : doc.description || '';
+
+  return (
+    <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+              DOCUMENTO
+            </span>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+              {doc.title || doc.file_name}
+            </h3>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
+          {textContent || 'Sin contenido en formato texto.'}
+        </div>
+
+        <div className="flex justify-between items-center pt-3 border-t border-slate-200 dark:border-slate-800 mt-3">
+          <span className="text-xs text-slate-400">{doc.file_size || ''}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700"
+            >
+              Cerrar
+            </button>
+            <a
+              href={doc.evidence_url}
+              download={doc.file_name || doc.title}
+              className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Descargar Archivo</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function TasksPage() {
   const {
@@ -62,6 +501,7 @@ export default function TasksPage() {
   const [leaderReviewTask, setLeaderReviewTask] = useState(null);
   const [reminderTask, setReminderTask] = useState(null);
   const [auditBanner, setAuditBanner] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch =
@@ -394,15 +834,15 @@ export default function TasksPage() {
                       </div>
                     )}
 
-                    {/* Resumen de lo realizado y Evidencias adjuntas por el integrante */}
+                    {/* Resumen de lo realizado y Evidencias / Entregables adjuntos por el integrante */}
                     {(task.deliverable_summary || (task.evidences && task.evidences.length > 0)) && (
-                      <div className="p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/50 text-xs space-y-2">
+                      <div className="p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/50 text-xs space-y-2.5">
                         {task.deliverable_summary && (
                           <div>
                             <span className="font-bold text-slate-800 dark:text-slate-200">
                               Reporte de avance / entrega del integrante:
                             </span>
-                            <p className="text-slate-600 dark:text-slate-300 mt-0.5">
+                            <p className="text-slate-600 dark:text-slate-300 mt-0.5 whitespace-pre-wrap">
                               {task.deliverable_summary}
                             </p>
                           </div>
@@ -410,21 +850,15 @@ export default function TasksPage() {
                         {task.evidences && task.evidences.length > 0 && (
                           <div className="space-y-1.5 pt-1">
                             <span className="font-bold text-slate-800 dark:text-slate-200 block">
-                              Evidencias y enlaces adjuntos ({task.evidences.length}):
+                              Entregables y archivos adjuntos ({task.evidences.length}):
                             </span>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {task.evidences.map((ev) => (
-                                <a
+                                <DeliverableEvidenceItem
                                   key={ev.id}
-                                  href={ev.evidence_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 font-semibold hover:border-indigo-400"
-                                >
-                                  <FileCheck2 className="w-3.5 h-3.5" />
-                                  <span>{ev.title}</span>
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
+                                  ev={ev}
+                                  onPreviewText={setPreviewDoc}
+                                />
                               ))}
                             </div>
                           </div>
@@ -567,11 +1001,12 @@ export default function TasksPage() {
         />
       )}
 
-      {/* Modal 2: Actualizar Progreso Parcial (Integrante / Líder) */}
+      {/* Modal 2: Actualizar Progreso Parcial y Subir Entregables (Integrante / Líder) */}
       {progressTask && (
         <UpdateProgressModal
           task={progressTask}
           onClose={() => setProgressTask(null)}
+          onPreviewDoc={setPreviewDoc}
           onSave={async (data) => {
             await updateTaskMemberProgress(progressTask.id, data);
             setProgressTask(null);
@@ -579,11 +1014,12 @@ export default function TasksPage() {
         />
       )}
 
-      {/* Modal 3: Marcar como Finalizada y Enviar a Revisión con Evidencias (Integrante) */}
+      {/* Modal 3: Marcar como Finalizada y Enviar a Revisión con Entregables / Archivos (Integrante) */}
       {submitReviewTask && (
         <SubmitForReviewModal
           task={submitReviewTask}
           onClose={() => setSubmitReviewTask(null)}
+          onPreviewDoc={setPreviewDoc}
           onSubmit={async (data) => {
             await submitTaskForLeaderReview(submitReviewTask.id, data);
             setSubmitReviewTask(null);
@@ -591,11 +1027,12 @@ export default function TasksPage() {
         />
       )}
 
-      {/* Modal 4: Revisar, Aprobar o Devolver Tarea (Líder / Admin) */}
+      {/* Modal 4: Revisar, Aprobar o Devolver Tarea con Entregables (Líder / Admin) */}
       {leaderReviewTask && (
         <LeaderReviewModal
           task={leaderReviewTask}
           onClose={() => setLeaderReviewTask(null)}
+          onPreviewDoc={setPreviewDoc}
           onDecision={async (data) => {
             await reviewTaskByLeader(leaderReviewTask.id, data);
             setLeaderReviewTask(null);
@@ -616,6 +1053,14 @@ export default function TasksPage() {
               details: `Se notificó el seguimiento para la tarea "${task.title}". Registro firmado por el Líder y archivado en la auditoría del sistema.`,
             });
           }}
+        />
+      )}
+
+      {/* Modal 6: Visor de Documentos Markdown y Texto */}
+      {previewDoc && (
+        <MarkdownPreviewModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
         />
       )}
     </div>
@@ -887,12 +1332,13 @@ function TaskFormModal({ initialTask, onClose, onSave }) {
   );
 }
 
-function UpdateProgressModal({ task, onClose, onSave }) {
+function UpdateProgressModal({ task, onClose, onSave, onPreviewDoc }) {
   const [progress, setProgress] = useState(task.progress || 0);
   const [status, setStatus] = useState(
     task.status === 'pendiente' ? 'en_proceso' : task.status
   );
   const [summary, setSummary] = useState(task.deliverable_summary || '');
+  const [stagedEvidences, setStagedEvidences] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -903,6 +1349,7 @@ function UpdateProgressModal({ task, onClose, onSave }) {
         progress: Number(progress),
         status,
         deliverable_summary: summary,
+        evidences: stagedEvidences,
       });
     } finally {
       setSaving(false);
@@ -911,21 +1358,21 @@ function UpdateProgressModal({ task, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-2">
           <h3 className="text-base font-bold text-slate-900 dark:text-white">
-            Actualizar Progreso de Actividad
+            Actualizar Progreso y Subir Entregables
           </h3>
-          <button onClick={onClose} className="p-1 text-slate-400">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-4">
+        <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-3 truncate">
           {task.title}
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-1">
           <div>
             <div className="flex justify-between text-xs font-semibold mb-1">
               <span>Porcentaje de Avance</span>
@@ -961,7 +1408,7 @@ function UpdateProgressModal({ task, onClose, onSave }) {
               Notas de Avance Realizado
             </label>
             <textarea
-              rows={3}
+              rows={2}
               placeholder="Describe los avances logrados hasta el momento..."
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
@@ -969,7 +1416,32 @@ function UpdateProgressModal({ task, onClose, onSave }) {
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          {/* Entregables previamente registrados */}
+          {task.evidences && task.evidences.length > 0 && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
+              <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                Entregables ya registrados en esta actividad ({task.evidences.length}):
+              </span>
+              <div className="grid grid-cols-1 gap-1.5 max-h-32 overflow-y-auto">
+                {task.evidences.map((ev) => (
+                  <DeliverableEvidenceItem key={ev.id} ev={ev} onPreviewText={onPreviewDoc} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Subida de nuevos entregables / documentos */}
+          <div className="p-3.5 rounded-xl bg-indigo-50/30 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 space-y-2">
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+              Adjuntar Archivos / Entregables de Avance (Word, PDF, Markdown, Zip)
+            </span>
+            <DeliverableFilesUploader
+              stagedEvidences={stagedEvidences}
+              setStagedEvidences={setStagedEvidences}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
@@ -980,9 +1452,10 @@ function UpdateProgressModal({ task, onClose, onSave }) {
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
             >
-              {saving ? 'Actualizando...' : 'Guardar Avance'}
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>{saving ? 'Guardando...' : 'Guardar Avance y Entregables'}</span>
             </button>
           </div>
         </form>
@@ -991,11 +1464,9 @@ function UpdateProgressModal({ task, onClose, onSave }) {
   );
 }
 
-function SubmitForReviewModal({ task, onClose, onSubmit }) {
+function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
   const [summary, setSummary] = useState(task.deliverable_summary || '');
-  const [evidenceTitle, setEvidenceTitle] = useState('');
-  const [evidenceUrl, setEvidenceUrl] = useState('');
-  const [evidenceType, setEvidenceType] = useState('pull_request');
+  const [stagedEvidences, setStagedEvidences] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -1004,9 +1475,7 @@ function SubmitForReviewModal({ task, onClose, onSubmit }) {
     try {
       await onSubmit({
         deliverable_summary: summary,
-        evidence_title: evidenceTitle,
-        evidence_url: evidenceUrl,
-        evidence_type: evidenceType,
+        evidences: stagedEvidences,
       });
     } finally {
       setSaving(false);
@@ -1015,21 +1484,21 @@ function SubmitForReviewModal({ task, onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
-        <div className="flex items-center justify-between mb-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between mb-2">
           <h3 className="text-base font-bold text-slate-900 dark:text-white">
             Marcar Tarea como Finalizada para Revisión
           </h3>
-          <button onClick={onClose} className="p-1 text-slate-400">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-          Al enviar esta entrega, el líder del proyecto recibirá una notificación automática para revisar y aprobar tu trabajo.
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+          Al enviar esta entrega, el líder del proyecto recibirá una notificación automática para revisar y aprobar tus entregables.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-1">
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Descripción detallada de lo realizado *
@@ -1044,55 +1513,37 @@ function SubmitForReviewModal({ task, onClose, onSubmit }) {
             />
           </div>
 
+          {/* Entregables acumulados previamente si existen */}
+          {task.evidences && task.evidences.length > 0 && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
+              <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                Entregables adjuntos previamente ({task.evidences.length}):
+              </span>
+              <div className="grid grid-cols-1 gap-1.5 max-h-28 overflow-y-auto">
+                {task.evidences.map((ev) => (
+                  <DeliverableEvidenceItem key={ev.id} ev={ev} onPreviewText={onPreviewDoc} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Subida de entregables / archivos / enlaces */}
           <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
-            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              Adjuntar Evidencia o Enlace de Entrega (Commit, PR, Documento)
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Título de la Evidencia
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: Pull Request #28 / Commit final"
-                  value={evidenceTitle}
-                  onChange={(e) => setEvidenceTitle(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Tipo de Evidencia
-                </label>
-                <select
-                  value={evidenceType}
-                  onChange={(e) => setEvidenceType(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-                >
-                  <option value="pull_request">Pull Request (GitHub)</option>
-                  <option value="commit">Commit en Repositorio</option>
-                  <option value="documento">Documento Técnico</option>
-                  <option value="despliegue">URL de Despliegue / Demo</option>
-                  <option value="enlace">Otro Enlace</option>
-                </select>
-              </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Adjuntar Archivos y Entregables (Word, PDF, Markdown, Zip, etc.)
+              </p>
+              <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                {stagedEvidences.length} archivo(s) por adjuntar
+              </span>
             </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                URL de la Evidencia
-              </label>
-              <input
-                type="url"
-                placeholder="https://github.com/organizacion/proyecto/pull/28"
-                value={evidenceUrl}
-                onChange={(e) => setEvidenceUrl(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-              />
-            </div>
+            <DeliverableFilesUploader
+              stagedEvidences={stagedEvidences}
+              setStagedEvidences={setStagedEvidences}
+            />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
@@ -1103,7 +1554,7 @@ function SubmitForReviewModal({ task, onClose, onSubmit }) {
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5"
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 shadow-sm"
             >
               <Send className="w-3.5 h-3.5" />
               <span>{saving ? 'Enviando...' : 'Enviar a Revisión del Líder'}</span>
@@ -1115,7 +1566,7 @@ function SubmitForReviewModal({ task, onClose, onSubmit }) {
   );
 }
 
-function LeaderReviewModal({ task, onClose, onDecision }) {
+function LeaderReviewModal({ task, onClose, onDecision, onPreviewDoc }) {
   const [feedback, setFeedback] = useState(task.leader_feedback || '');
   const [saving, setSaving] = useState(false);
 
@@ -1134,38 +1585,58 @@ function LeaderReviewModal({ task, onClose, onDecision }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-slate-900 dark:text-white">
             Revisión de Entrega por el Líder
           </h3>
-          <button onClick={onClose} className="p-1 text-slate-400">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs space-y-2">
-          <p className="font-bold text-slate-900 dark:text-white">{task.title}</p>
-          <p className="text-slate-600 dark:text-slate-300">
-            <strong>Resumen reportado por el integrante:</strong>{' '}
-            {task.deliverable_summary || 'Sin descripción adicional.'}
-          </p>
+        <div className="space-y-3 overflow-y-auto pr-1">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs space-y-2">
+            <p className="font-bold text-slate-900 dark:text-white">{task.title}</p>
+            <p className="text-slate-600 dark:text-slate-300">
+              <strong>Resumen reportado por el integrante:</strong>{' '}
+              {task.deliverable_summary || 'Sin descripción adicional.'}
+            </p>
+          </div>
+
+          {/* Entregables y archivos adjuntos para revisión */}
+          {task.evidences && task.evidences.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/50 space-y-2">
+              <span className="font-bold text-xs text-indigo-900 dark:text-indigo-200 block">
+                Entregables y Archivos para Revisión ({task.evidences.length}):
+              </span>
+              <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto">
+                {task.evidences.map((ev) => (
+                  <DeliverableEvidenceItem
+                    key={ev.id}
+                    ev={ev}
+                    onPreviewText={onPreviewDoc}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Retroalimentación / Comentarios del Líder
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Escribe tus comentarios de aprobación o detalla las correcciones solicitadas..."
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+            />
+          </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-            Retroalimentación / Comentarios del Líder
-          </label>
-          <textarea
-            rows={3}
-            placeholder="Escribe tus comentarios de aprobación o detalla las correcciones solicitadas..."
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
           <button
             type="button"
             onClick={onClose}

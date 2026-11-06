@@ -73,7 +73,16 @@ export function ProjectProvider({ children }) {
     isSupabaseConfigured ? [] : INITIAL_PROJECT_MEMBERS
   );
   const [workPlan, setWorkPlan] = useState(isSupabaseConfigured ? [] : INITIAL_WORK_PLAN);
-  const [tasks, setTasks] = useState(isSupabaseConfigured ? [] : INITIAL_TASKS);
+  const [tasks, setTasks] = useState(() => {
+    try {
+      const cached = localStorage.getItem('NEXUS_PROJECT_TASKS_CACHE');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return isSupabaseConfigured ? [] : INITIAL_TASKS;
+  });
   const [changelog, setChangelog] = useState(isSupabaseConfigured ? [] : INITIAL_CHANGELOG);
   const [repositories, setRepositories] = useState(
     isSupabaseConfigured ? [] : INITIAL_REPOSITORIES
@@ -230,6 +239,9 @@ export function ProjectProvider({ children }) {
       }));
 
       setTasks(enrichedTasks);
+      try {
+        localStorage.setItem('NEXUS_PROJECT_TASKS_CACHE', JSON.stringify(enrichedTasks));
+      } catch (_) {}
       setChangelog(changelogRes.data || []);
       setRepositories(reposRes.data || []);
       setNotifications(notifRes.data || []);
@@ -1156,7 +1168,7 @@ export function ProjectProvider({ children }) {
 
   const updateTaskMemberProgress = async (
     taskId,
-    { progress, status, deliverable_summary }
+    { progress, status, deliverable_summary, evidences = [] }
   ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
@@ -1164,37 +1176,76 @@ export function ProjectProvider({ children }) {
     const nextStatus =
       status || (progress > 0 && targetTask.status === 'pendiente' ? 'en_proceso' : targetTask.status);
 
+    const nowIso = new Date().toISOString();
+    let newEvidenceList = [];
+    if (Array.isArray(evidences) && evidences.length > 0) {
+      newEvidenceList = evidences.map((ev, idx) => ({
+        id: ev.id || `ev-${Date.now()}-${idx}`,
+        task_id: taskId,
+        user_id: currentUser?.id,
+        title: ev.title || ev.file_name || `Entregable ${idx + 1}`,
+        description: ev.description || '',
+        evidence_url: ev.evidence_url || ev.data_url || '',
+        evidence_type: ev.evidence_type || 'documento',
+        file_name: ev.file_name || ev.title || `entregable_${idx + 1}`,
+        file_size: ev.file_size || '',
+        created_at: nowIso,
+      }));
+    }
+
     if (isSupabaseConfigured && supabase) {
+      for (const evItem of newEvidenceList) {
+        try {
+          await supabase.from('task_evidences').insert([
+            {
+              task_id: taskId,
+              user_id: currentUser?.id,
+              title: evItem.title,
+              description: evItem.description || (evItem.file_size ? `${evItem.file_name} (${evItem.file_size})` : ''),
+              evidence_url: evItem.evidence_url,
+              evidence_type: evItem.evidence_type || 'documento',
+            },
+          ]);
+        } catch (evErr) {
+          console.warn('Advertencia al insertar evidencia:', evErr);
+        }
+      }
+
       const { error } = await supabase
         .from('tasks')
         .update({
           progress: Number(progress),
           status: nextStatus,
           deliverable_summary,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         })
         .eq('id', taskId);
-      if (error) throw error;
+      if (error) console.warn('Advertencia al actualizar tarea:', error);
     }
 
-    setTasks((prev) =>
-      prev.map((t) =>
+    setTasks((prev) => {
+      const updated = prev.map((t) =>
         t.id === taskId
           ? {
               ...t,
               progress: Number(progress),
               status: nextStatus,
               deliverable_summary: deliverable_summary ?? t.deliverable_summary,
+              evidences: [...newEvidenceList, ...(t.evidences || [])],
             }
           : t
-      )
-    );
+      );
+      try {
+        localStorage.setItem('NEXUS_PROJECT_TASKS_CACHE', JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
 
     await registerAutomaticChangelog({
       title: `Actualización de avance (${progress}%): ${targetTask.title}`,
       description: `${currentUser?.full_name} actualizó el progreso de "${targetTask.title}" al ${progress}%. ${
-        deliverable_summary ? `Detalle: ${deliverable_summary}` : ''
-      }`,
+        newEvidenceList.length > 0 ? `Se adjuntaron ${newEvidenceList.length} entregable(s). ` : ''
+      }${deliverable_summary ? `Detalle: ${deliverable_summary}` : ''}`,
       taskId,
       entryType: 'cambio_estado',
     });
@@ -1206,35 +1257,33 @@ export function ProjectProvider({ children }) {
       deliverable_summary,
       evidence_title,
       evidence_url,
-      evidence_type = 'pull_request',
+      evidence_type = 'documento',
       evidence_description = '',
+      evidences = [],
     }
   ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
     const nowIso = new Date().toISOString();
-    let newEvidenceObj = null;
+    let newEvidenceList = [];
 
-    if (evidence_url && evidence_title) {
-      if (isSupabaseConfigured && supabase) {
-        const { data: evData } = await supabase
-          .from('task_evidences')
-          .insert([
-            {
-              task_id: taskId,
-              user_id: currentUser?.id,
-              title: evidence_title,
-              description: evidence_description,
-              evidence_url,
-              evidence_type,
-            },
-          ])
-          .select()
-          .single();
-        if (evData) newEvidenceObj = evData;
-      } else {
-        newEvidenceObj = {
+    if (Array.isArray(evidences) && evidences.length > 0) {
+      newEvidenceList = evidences.map((ev, idx) => ({
+        id: ev.id || `ev-${Date.now()}-${idx}`,
+        task_id: taskId,
+        user_id: currentUser?.id,
+        title: ev.title || ev.file_name || `Entregable ${idx + 1}`,
+        description: ev.description || '',
+        evidence_url: ev.evidence_url || ev.data_url || '',
+        evidence_type: ev.evidence_type || 'documento',
+        file_name: ev.file_name || ev.title || `archivo_${idx + 1}`,
+        file_size: ev.file_size || '',
+        created_at: nowIso,
+      }));
+    } else if (evidence_url && evidence_title) {
+      newEvidenceList = [
+        {
           id: `ev-${Date.now()}`,
           task_id: taskId,
           user_id: currentUser?.id,
@@ -1242,12 +1291,31 @@ export function ProjectProvider({ children }) {
           description: evidence_description,
           evidence_url,
           evidence_type,
+          file_name: evidence_title,
+          file_size: '',
           created_at: nowIso,
-        };
-      }
+        },
+      ];
     }
 
     if (isSupabaseConfigured && supabase) {
+      for (const evItem of newEvidenceList) {
+        try {
+          await supabase.from('task_evidences').insert([
+            {
+              task_id: taskId,
+              user_id: currentUser?.id,
+              title: evItem.title,
+              description: evItem.description || (evItem.file_size ? `${evItem.file_name} (${evItem.file_size})` : ''),
+              evidence_url: evItem.evidence_url,
+              evidence_type: evItem.evidence_type || 'documento',
+            },
+          ]);
+        } catch (evErr) {
+          console.warn('Advertencia al insertar evidencia en Supabase:', evErr);
+        }
+      }
+
       const { error } = await supabase
         .from('tasks')
         .update({
@@ -1258,11 +1326,11 @@ export function ProjectProvider({ children }) {
           updated_at: nowIso,
         })
         .eq('id', taskId);
-      if (error) throw error;
+      if (error) console.warn('Advertencia al actualizar tarea:', error);
     }
 
-    setTasks((prev) =>
-      prev.map((t) =>
+    setTasks((prev) => {
+      const updated = prev.map((t) =>
         t.id === taskId
           ? {
               ...t,
@@ -1270,20 +1338,24 @@ export function ProjectProvider({ children }) {
               progress: 100,
               completed_at: nowIso,
               deliverable_summary,
-              evidences: newEvidenceObj
-                ? [newEvidenceObj, ...(t.evidences || [])]
-                : t.evidences || [],
+              evidences: [...newEvidenceList, ...(t.evidences || [])],
             }
           : t
-      )
-    );
+      );
+      try {
+        localStorage.setItem('NEXUS_PROJECT_TASKS_CACHE', JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
 
+    const firstUrl = newEvidenceList[0]?.evidence_url || evidence_url || '';
+    const docsCount = newEvidenceList.length;
     await registerAutomaticChangelog({
       title: `Actividad marcada como finalizada para revisión: ${targetTask.title}`,
-      description: `${currentUser?.full_name} completó la actividad "${targetTask.title}" y la envió a revisión del líder. Resumen de entrega: ${deliverable_summary}`,
+      description: `${currentUser?.full_name} completó la actividad "${targetTask.title}" y la envió a revisión del líder con ${docsCount} entregable(s). Resumen de entrega: ${deliverable_summary || 'Sin notas adicionales'}`,
       taskId,
-      commitOrPrUrl: evidence_url || '',
-      evidenceUrl: evidence_url || '',
+      commitOrPrUrl: firstUrl.startsWith('http') ? firstUrl : '',
+      evidenceUrl: firstUrl.startsWith('http') ? firstUrl : '',
       entryType: 'finalizacion',
     });
 
