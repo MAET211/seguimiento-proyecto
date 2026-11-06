@@ -1,6 +1,6 @@
 export const ROLE_CONFIG = {
   admin: {
-    label: 'Administrador',
+    label: 'Administrador General',
     badgeClass: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800',
     dotClass: 'bg-purple-500',
   },
@@ -13,6 +13,21 @@ export const ROLE_CONFIG = {
     label: 'Integrante',
     badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800',
     dotClass: 'bg-emerald-500',
+  },
+  colaborador_estudio: {
+    label: 'Colaborador de Estudio',
+    badgeClass: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800',
+    dotClass: 'bg-purple-500',
+  },
+  editor: {
+    label: 'Editor de Estudio',
+    badgeClass: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800',
+    dotClass: 'bg-blue-500',
+  },
+  lector: {
+    label: 'Lector de Estudio',
+    badgeClass: 'bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+    dotClass: 'bg-slate-400',
   },
 };
 

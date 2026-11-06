@@ -404,7 +404,7 @@ export default function DashboardPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {teamActivitySummary.map((m) => {
-                const roleCfg = ROLE_CONFIG[m.role];
+                const roleCfg = ROLE_CONFIG[m.role] || ROLE_CONFIG.integrante;
                 const isMe = m.id === currentUser?.id;
                 return (
                   <tr

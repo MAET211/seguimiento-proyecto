@@ -74,7 +74,10 @@ export default function Layout() {
   const [inputAnonKey, setInputAnonKey] = useState('');
   const [seeding, setSeeding] = useState(false);
 
-  const roleBadge = ROLE_CONFIG[currentUser?.role || 'integrante'];
+  const roleBadge =
+    ROLE_CONFIG[currentUser?.role] ||
+    ROLE_CONFIG[currentUser?.study_role] ||
+    ROLE_CONFIG.integrante;
 
   // Navegación para el entorno del proyecto SIGMA
   const navItems = [
@@ -90,13 +93,13 @@ export default function Layout() {
       icon: CheckSquare,
       badge:
         currentUser?.role === 'lider' || currentUser?.role === 'admin'
-          ? metrics.inReviewTasks > 0
+          ? (metrics?.inReviewTasks || 0) > 0
             ? `${metrics.inReviewTasks} rev.`
-            : metrics.totalTasks
-          : metrics.totalTasks,
+            : (metrics?.totalTasks || 0)
+          : (metrics?.totalTasks || 0),
       badgeHighlight:
         (currentUser?.role === 'lider' || currentUser?.role === 'admin') &&
-        metrics.inReviewTasks > 0,
+        (metrics?.inReviewTasks || 0) > 0,
     },
     {
       to: '/plan-trabajo',
@@ -301,10 +304,10 @@ export default function Layout() {
               </span>
             ) : (
               <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roleBadge.badgeClass}`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${roleBadge?.badgeClass || 'bg-slate-100 text-slate-800'}`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${roleBadge.dotClass}`} />
-                {roleBadge.label}
+                <span className={`w-1.5 h-1.5 rounded-full ${roleBadge?.dotClass || 'bg-slate-400'}`} />
+                {roleBadge?.label || 'Usuario'}
               </span>
             )}
             <button

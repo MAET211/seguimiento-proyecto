@@ -199,12 +199,35 @@ export function PersonalStudyProvider({ children }) {
       {
         id: 'mem-covaleda-01',
         user_id: 'usr-covaleda-01',
-        email: 'covaleda@gmail.com',
-        full_name: 'Covaleda',
+        email: 'josecovaleda.fisica2024@gmail.com',
+        full_name: 'Esneider Covaleda',
         role: 'editor',
         joined_at: '2026-11-05T00:00:00.000Z',
         is_owner: false,
         is_active: true,
+        assigned_password: '123456',
+      },
+      {
+        id: 'mem-covaleda-02',
+        user_id: 'usr-covaleda-02',
+        email: 'covaleda@gmail.com',
+        full_name: 'Esneider Covaleda',
+        role: 'editor',
+        joined_at: '2026-11-05T00:00:00.000Z',
+        is_owner: false,
+        is_active: true,
+        assigned_password: '123456',
+      },
+      {
+        id: 'mem-miguel-collab-01',
+        user_id: 'usr-miguel-collab-01',
+        email: 'miguelestradatorrentes@gmail.com',
+        full_name: 'Miguel Estrada',
+        role: 'editor',
+        joined_at: '2026-11-06T00:00:00.000Z',
+        is_owner: false,
+        is_active: true,
+        assigned_password: '123456@M',
       },
     ];
   });
@@ -490,15 +513,13 @@ export function PersonalStudyProvider({ children }) {
   // CONTROL DE ACCESO Y PERMISOS ESTRICTOS POR ENTORNO
   // ---------------------------------------------------------------------------
   // 1. Administrador Principal / General de NexusPM:
-  // Es el usuario con rol 'admin', o el 'lider' del proyecto (e.g. Miguel Estrada torrente),
-  // o el dueño registrado en project, o cuya especialidad es Administrador General.
+  // Es única y exclusivamente el propietario global (Miguel Estrada torrente / admin),
+  // quien tiene autorización dual para supervisar y administrar tanto SIGMA como Estudio Personal.
   const isNexusAdmin = Boolean(
     currentUser?.role === 'admin' ||
-    currentUser?.role === 'lider' ||
-    (project?.leader_id && currentUser?.id && project.leader_id === currentUser.id) ||
-    currentUser?.specialty?.toLowerCase().includes('administrador general') ||
-    currentUser?.specialty?.toLowerCase().includes('lider del proyecto') ||
-    currentUser?.email === 'admin@nexuspm.dev'
+    currentUser?.email?.trim().toLowerCase() === 'miguelestrada@proyecto.com' ||
+    currentUser?.email?.trim().toLowerCase() === 'admin@nexuspm.dev' ||
+    currentUser?.specialty?.toLowerCase().includes('administrador general de plataforma')
   );
 
   // 2. Membresía explícita en el espacio de estudio
@@ -527,12 +548,19 @@ export function PersonalStudyProvider({ children }) {
     return null;
   }, [isNexusAdmin, currentMember]);
 
-  // Si no es el Administrador Principal de NexusPM ni un miembro autorizado por invitación, NO TIENE ACCESO
-  const hasStudyAccess = Boolean(isNexusAdmin || currentMember);
+  // Si no es el Administrador Principal de NexusPM ni un miembro autorizado por invitación activa, NO TIENE ACCESO
+  const hasStudyAccess = Boolean(
+    isNexusAdmin || (currentMember && currentMember.is_active !== false)
+  );
 
-  // Acceso al entorno SIGMA (proyecto principal)
+  // Acceso al entorno SIGMA (proyecto principal):
+  // Exclusivo para el Administrador General, y miembros/líderes con cuenta autorizada en SIGMA.
+  // Los colaboradores exclusivos de Estudio Personal NO tienen acceso a SIGMA.
   const hasSigmaAccess = Boolean(
-    isNexusAdmin || currentUser?.role === 'lider' || currentUser?.role === 'integrante'
+    isNexusAdmin ||
+    ((currentUser?.role === 'lider' || currentUser?.role === 'integrante') &&
+      currentUser?.role !== 'colaborador_estudio' &&
+      !currentUser?.is_study_only)
   );
 
   const canManageMembers = isNexusAdmin || myStudyRole === 'admin';
@@ -955,6 +983,22 @@ export function PersonalStudyProvider({ children }) {
                 is_active: true,
               },
             ]);
+          }
+
+          // Registrar en la tabla invitations para persistencia y lectura en cualquier dispositivo
+          if (supabase) {
+            try {
+              await supabase.from('invitations').upsert([
+                {
+                  project_id: 'study-space-01',
+                  email: cleanEmail,
+                  role: role,
+                  token: 'study_member',
+                  invited_by: currentUser?.id || 'usr-admin-01',
+                  status: 'accepted',
+                },
+              ]);
+            } catch (_) {}
           }
         } catch (authErr) {
           console.warn('Registro en Supabase Auth:', authErr.message);

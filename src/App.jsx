@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'r
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { PersonalStudyProvider, usePersonalStudy } from './context/PersonalStudyContext';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 import TasksPage from './pages/TasksPage';
@@ -90,7 +91,8 @@ function PublicOnlyRoute({ children }) {
 
   // Si ya inició sesión, bloquear el acceso a /login (incluso con la flecha regresar de Chrome)
   if (currentUser) {
-    return <Navigate to="/" replace />;
+    const isStudyOnly = currentUser.role === 'colaborador_estudio' || currentUser.is_study_only;
+    return <Navigate to={isStudyOnly ? '/estudio-personal' : '/'} replace />;
   }
 
   return children;
@@ -141,7 +143,9 @@ export default function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <Layout />
+                  <ErrorBoundary>
+                    <Layout />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             >
