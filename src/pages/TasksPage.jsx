@@ -137,9 +137,17 @@ function DeliverableEvidenceItem({ ev, onPreviewText }) {
           {badge.label}
         </span>
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate" title={fileName}>
-            {ev.title || fileName}
-          </p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate" title={fileName}>
+              {ev.title || fileName}
+            </p>
+            {ev.deliverable_item && (
+              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shrink-0">
+                {ev.deliverable_item}
+                {ev.deliverable_pct ? ` • ${ev.deliverable_pct}%` : ''}
+              </span>
+            )}
+          </div>
           {(ev.file_size || ev.file_name) && (
             <p className="text-[10px] text-slate-400 truncate">
               {ev.file_name ? ev.file_name : ''}
@@ -189,7 +197,7 @@ function DeliverableEvidenceItem({ ev, onPreviewText }) {
   );
 }
 
-function DeliverableFilesUploader({ stagedEvidences, setStagedEvidences }) {
+function DeliverableFilesUploader({ stagedEvidences, setStagedEvidences, defaultItemName = '', defaultItemPct = null }) {
   const [activeTab, setActiveTab] = useState('files');
   const [urlTitle, setUrlTitle] = useState('');
   const [urlType, setUrlType] = useState('pull_request');
@@ -215,6 +223,8 @@ function DeliverableFilesUploader({ stagedEvidences, setStagedEvidences }) {
               file_extension: ext,
               evidence_url: reader.result,
               evidence_type: 'documento',
+              deliverable_item: defaultItemName || '',
+              deliverable_pct: defaultItemPct || null,
               created_at: new Date().toISOString(),
             });
           };
@@ -243,6 +253,8 @@ function DeliverableFilesUploader({ stagedEvidences, setStagedEvidences }) {
       file_name: '',
       file_size: '',
       file_extension: '',
+      deliverable_item: defaultItemName || '',
+      deliverable_pct: defaultItemPct || null,
       created_at: new Date().toISOString(),
     };
     setStagedEvidences((prev) => [...prev, newLinkEv]);
@@ -482,6 +494,7 @@ export default function TasksPage() {
     updateTaskMemberProgress,
     submitTaskForLeaderReview,
     reviewTaskByLeader,
+    adjustTaskProgressAndStatus,
     deleteTask,
   } = useProject();
 
@@ -499,6 +512,7 @@ export default function TasksPage() {
   const [progressTask, setProgressTask] = useState(null);
   const [submitReviewTask, setSubmitReviewTask] = useState(null);
   const [leaderReviewTask, setLeaderReviewTask] = useState(null);
+  const [adjustTask, setAdjustTask] = useState(null);
   const [reminderTask, setReminderTask] = useState(null);
   const [auditBanner, setAuditBanner] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -940,7 +954,11 @@ export default function TasksPage() {
                               className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors"
                             >
                               <Send className="w-3.5 h-3.5" />
-                              <span>Marcar Finalizada para Revisión</span>
+                              <span>
+                                {task.progress && task.progress > 0
+                                  ? `Enviar Siguiente Entregable (${task.progress}%)`
+                                  : 'Enviar Entregable para Revisión'}
+                              </span>
                             </button>
                           )}
                         </div>
@@ -958,9 +976,22 @@ export default function TasksPage() {
                       )}
 
                       {task.status === 'completada' && (
-                        <div className="py-1.5 px-3 rounded-xl bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Actividad Aprobada y Completada</span>
+                        <div className="space-y-1.5">
+                          <div className="py-1.5 px-3 rounded-xl bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Actividad Aprobada y Completada (100%)</span>
+                          </div>
+                          {(isLeaderOrAdmin || canUpdateProgress) && (
+                            <button
+                              type="button"
+                              onClick={() => setAdjustTask(task)}
+                              className="w-full py-1.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-colors"
+                              title="Ajustar porcentaje o reabrir tarea para subir los siguientes entregables"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                              <span>Ajustar % / Reabrir para más entregables</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1036,6 +1067,18 @@ export default function TasksPage() {
           onDecision={async (data) => {
             await reviewTaskByLeader(leaderReviewTask.id, data);
             setLeaderReviewTask(null);
+          }}
+        />
+      )}
+
+      {/* Modal 4.5: Ajustar Progreso y Reabrir Entregables (Líder / Admin / Integrante) */}
+      {adjustTask && (
+        <AdjustTaskModal
+          task={adjustTask}
+          onClose={() => setAdjustTask(null)}
+          onSave={async (data) => {
+            await adjustTaskProgressAndStatus(adjustTask.id, data);
+            setAdjustTask(null);
           }}
         />
       )}
@@ -1465,9 +1508,52 @@ function UpdateProgressModal({ task, onClose, onSave, onPreviewDoc }) {
 }
 
 function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
+  const currentProgress = task.progress || 0;
+  const existingEvidences = task.evidences || [];
+  const nextNum = existingEvidences.length + 1;
+
+  // Número estimado de entregables para la tarea (1, 2, 3 o 4)
+  const [totalItems, setTotalItems] = useState(3);
+  const [itemNumber, setItemNumber] = useState(Math.min(nextNum, 3));
+  const [customItemTitle, setCustomItemTitle] = useState('');
+
+  const computeSuggestedPct = (num, tot) => {
+    if (tot === 1 || num >= tot) return 100;
+    if (tot === 3) {
+      if (num === 1) return 33;
+      if (num === 2) return 66;
+      return 100;
+    }
+    if (tot === 2) {
+      return num === 1 ? 50 : 100;
+    }
+    if (tot === 4) {
+      if (num === 1) return 25;
+      if (num === 2) return 50;
+      if (num === 3) return 75;
+      return 100;
+    }
+    return Math.min(100, Math.round((num / tot) * 100));
+  };
+
+  const [percentage, setPercentage] = useState(() => computeSuggestedPct(Math.min(nextNum, 3), 3));
   const [summary, setSummary] = useState(task.deliverable_summary || '');
   const [stagedEvidences, setStagedEvidences] = useState([]);
   const [saving, setSaving] = useState(false);
+
+  const activeItemLabel = customItemTitle.trim() || `Entregable ${itemNumber} de ${totalItems}`;
+
+  const handleTotalChange = (tot) => {
+    setTotalItems(tot);
+    const validNum = Math.min(itemNumber, tot);
+    setItemNumber(validNum);
+    setPercentage(computeSuggestedPct(validNum, tot));
+  };
+
+  const handleItemNumChange = (num) => {
+    setItemNumber(num);
+    setPercentage(computeSuggestedPct(num, totalItems));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1475,7 +1561,14 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
     try {
       await onSubmit({
         deliverable_summary: summary,
-        evidences: stagedEvidences,
+        evidences: stagedEvidences.map((ev, idx) => ({
+          ...ev,
+          deliverable_item: ev.deliverable_item || activeItemLabel,
+          deliverable_pct: Number(percentage),
+        })),
+        progress: Number(percentage),
+        deliverable_item: activeItemLabel,
+        is_final: Number(percentage) >= 100,
       });
     } finally {
       setSaving(false);
@@ -1486,19 +1579,155 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">
-            Marcar Tarea como Finalizada para Revisión
-          </h3>
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Enviar Entregable y Reportar Avance para Revisión
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Selecciona el ítem de entregable y el porcentaje de avance correspondiente.
+            </p>
+          </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-          Al enviar esta entrega, el líder del proyecto recibirá una notificación automática para revisar y aprobar tus entregables.
-        </p>
-
         <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-1">
+          {/* Bloque: Configuración de Entregables e Ítem */}
+          <div className="p-3.5 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200/70 dark:border-purple-900/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-950 dark:text-purple-200 flex items-center gap-1.5">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>¿Cuántos entregables componen esta actividad?</span>
+              </span>
+              <span className="text-[11px] font-extrabold text-purple-700 dark:text-purple-300">
+                Total: {totalItems} entregable(s)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-1.5">
+              {[
+                { count: 1, label: '1 (100%)' },
+                { count: 2, label: '2 (50% c/u)' },
+                { count: 3, label: '3 (33% c/u)' },
+                { count: 4, label: '4 (25% c/u)' },
+              ].map((opt) => (
+                <button
+                  key={opt.count}
+                  type="button"
+                  onClick={() => handleTotalChange(opt.count)}
+                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all text-center ${
+                    totalItems === opt.count
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-purple-100 dark:border-purple-900/40 hover:bg-purple-100/50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {totalItems > 1 && (
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Ítem que estás presentando en esta entrega:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {Array.from({ length: totalItems }).map((_, i) => {
+                    const num = i + 1;
+                    const isSelected = itemNumber === num;
+                    return (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => handleItemNumChange(num)}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-indigo-50'
+                        }`}
+                      >
+                        Entregable {num} de {totalItems}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Título o especificación del entregable (opcional)
+              </label>
+              <input
+                type="text"
+                placeholder={`Ej: ${activeItemLabel} - Mapear leyes, decretos y resoluciones`}
+                value={customItemTitle}
+                onChange={(e) => setCustomItemTitle(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-medium"
+              />
+            </div>
+
+            {/* Selector del porcentaje a acreditar */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                  Porcentaje de avance a acreditar con esta entrega:
+                </span>
+                <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
+                  {percentage}%
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                {[25, 33, 50, 66, 75, 100].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setPercentage(pct)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      percentage === pct
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-indigo-50'
+                    }`}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-xs text-slate-500 font-medium">Libre:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={percentage}
+                    onChange={(e) => setPercentage(Math.max(1, Math.min(100, Number(e.target.value))))}
+                    className="w-16 px-2 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-center"
+                  />
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-400">%</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-slate-600 dark:text-slate-300">
+                {percentage < 100 ? (
+                  <p className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-medium">
+                    <span>🟡</span>
+                    <span>
+                      <strong>Entrega Parcial ({percentage}%):</strong> Al ser aprobada por el líder, la actividad avanzará al <strong>{percentage}%</strong> y continuará en estado <strong>En Proceso</strong> para que puedas presentar los entregables restantes.
+                    </span>
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-medium">
+                    <span>🟢</span>
+                    <span>
+                      <strong>Entrega Final (100%):</strong> Al ser aprobada por el líder, la actividad quedará completada y culminada al <strong>100%</strong>.
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Descripción detallada de lo realizado *
@@ -1506,7 +1735,7 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
             <textarea
               rows={3}
               required
-              placeholder="Detalla los cambios implementados, pruebas realizadas y resultados obtenidos..."
+              placeholder="Detalla los cambios implementados, avances y resultados correspondientes a este entregable..."
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
@@ -1540,6 +1769,8 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
             <DeliverableFilesUploader
               stagedEvidences={stagedEvidences}
               setStagedEvidences={setStagedEvidences}
+              defaultItemName={activeItemLabel}
+              defaultItemPct={percentage}
             />
           </div>
 
@@ -1547,7 +1778,7 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700"
+              className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               Cancelar
             </button>
@@ -1557,7 +1788,13 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 shadow-sm"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>{saving ? 'Enviando...' : 'Enviar a Revisión del Líder'}</span>
+              <span>
+                {saving
+                  ? 'Enviando...'
+                  : percentage < 100
+                  ? `Enviar Entregable Parcial (${percentage}%) a Revisión`
+                  : 'Enviar Entrega Final (100%) a Revisión'}
+              </span>
             </button>
           </div>
         </form>
@@ -1568,16 +1805,24 @@ function SubmitForReviewModal({ task, onClose, onSubmit, onPreviewDoc }) {
 
 function LeaderReviewModal({ task, onClose, onDecision, onPreviewDoc }) {
   const [feedback, setFeedback] = useState(task.leader_feedback || '');
+  const proposedPct = task.progress || 33;
+  const [approvedProgress, setApprovedProgress] = useState(proposedPct);
   const [saving, setSaving] = useState(false);
 
-  const handleAction = async (decision) => {
+  const handleAction = async (decision, customProgress = null) => {
     if (decision === 'devolver' && !feedback.trim()) {
       alert('Por favor indica las observaciones o correcciones requeridas al devolver la tarea.');
       return;
     }
     setSaving(true);
     try {
-      await onDecision({ decision, leader_feedback: feedback });
+      const finalApprovedPct = customProgress !== null ? customProgress : approvedProgress;
+      await onDecision({
+        decision: decision === 'devolver' ? 'devolver' : 'aprobar',
+        leader_feedback: feedback,
+        approved_progress: finalApprovedPct,
+        is_final: decision === 'aprobar_final' || finalApprovedPct >= 100,
+      });
     } finally {
       setSaving(false);
     }
@@ -1622,6 +1867,70 @@ function LeaderReviewModal({ task, onClose, onDecision, onPreviewDoc }) {
             </div>
           )}
 
+          {/* Sección de Aprobación y Validación de Porcentaje */}
+          <div className="p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/80 dark:border-purple-900/50 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-950 dark:text-purple-200 flex items-center gap-1.5">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600" />
+                <span>Porcentaje de Avance a Acreditar</span>
+              </span>
+              <span className="text-xs font-extrabold text-purple-700 dark:text-purple-300">
+                {approvedProgress}%
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-600 dark:text-slate-400">
+              Avance propuesto por el integrante: <strong>{task.progress || 33}%</strong>. Confirma o ajusta el porcentaje de avance para esta entrega:
+            </p>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[25, 33, 50, 66, 75, 100].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => setApprovedProgress(pct)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    approvedProgress === pct
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-purple-50'
+                  }`}
+                >
+                  {pct}%
+                </button>
+              ))}
+              <div className="flex items-center gap-1 ml-auto">
+                <span className="text-xs text-slate-500 font-medium">Libre:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={approvedProgress}
+                  onChange={(e) => setApprovedProgress(Math.max(1, Math.min(100, Number(e.target.value))))}
+                  className="w-16 px-2 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-center"
+                />
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-400">%</span>
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-900/40 text-[11px] text-slate-600 dark:text-slate-300">
+              {approvedProgress < 100 ? (
+                <p className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-medium">
+                  <span>ℹ️</span>
+                  <span>
+                    <strong>Aprobación Parcial ({approvedProgress}%):</strong> La tarea quedará en estado <strong>En Proceso</strong> acreditando {approvedProgress}% de avance, manteniéndose abierta para recibir los siguientes entregables.
+                  </span>
+                </p>
+              ) : (
+                <p className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-medium">
+                  <span>✅</span>
+                  <span>
+                    <strong>Aprobación Final (100%):</strong> La tarea se marcará formalmente como <strong>Completada</strong>.
+                  </span>
+                </p>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Retroalimentación / Comentarios del Líder
@@ -1636,11 +1945,11 @@ function LeaderReviewModal({ task, onClose, onDecision, onPreviewDoc }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700"
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             Cancelar
           </button>
@@ -1648,21 +1957,159 @@ function LeaderReviewModal({ task, onClose, onDecision, onPreviewDoc }) {
             type="button"
             disabled={saving}
             onClick={() => handleAction('devolver')}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5"
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 shadow-xs"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Devolver para Correcciones</span>
           </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => handleAction('aprobar')}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Aprobar y Completar Tarea</span>
+          {approvedProgress < 100 ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleAction('aprobar', approvedProgress)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Aprobar Entrega Parcial ({approvedProgress}%)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleAction('aprobar_final', 100)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-xs"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Aprobar y Completar Tarea (100%)</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdjustTaskModal({ task, onClose, onSave }) {
+  const [progress, setProgress] = useState(task.progress || 33);
+  const [status, setStatus] = useState(task.status || 'en_proceso');
+  const [feedback, setFeedback] = useState(task.leader_feedback || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave({
+        progress: Number(progress),
+        status,
+        leader_feedback: feedback,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Ajustar Progreso y Reabrir Entregables
+            </h3>
+            <p className="text-xs text-slate-500">
+              Modifica el porcentaje o reabre la tarea para siguientes entregables
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
+            <X className="w-5 h-5" />
           </button>
         </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 truncate">
+            {task.title}
+          </p>
+
+          <div>
+            <div className="flex justify-between text-xs font-semibold mb-1">
+              <span>Porcentaje de Avance Real:</span>
+              <span className="font-extrabold text-indigo-600 text-sm">{progress}%</span>
+            </div>
+            <div className="flex gap-1.5 mb-2">
+              {[25, 33, 50, 66, 75, 100].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => setProgress(pct)}
+                  className={`flex-1 py-1 rounded-lg text-xs font-bold ${
+                    progress === pct
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={progress}
+              onChange={(e) => setProgress(Number(e.target.value))}
+              className="w-full accent-indigo-600 cursor-pointer"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Estado de la Actividad
+            </label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 font-semibold"
+            >
+              <option value="en_proceso">En proceso (Abierta para más entregables)</option>
+              <option value="en_revision">En revisión del líder</option>
+              <option value="completada">Completada (100%)</option>
+              <option value="pendiente">Pendiente</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Nota / Observación de ajuste
+            </label>
+            <input
+              type="text"
+              placeholder="Ej: Se reabre la tarea al 33% para recibir el entregable 2 de 3"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-300 dark:border-slate-700"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {saving ? 'Guardando...' : 'Aplicar Ajuste'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -1397,12 +1397,16 @@ export function ProjectProvider({ children }) {
       evidence_type = 'documento',
       evidence_description = '',
       evidences = [],
+      progress = 100,
+      deliverable_item = '',
+      is_final = false,
     }
   ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
     const nowIso = new Date().toISOString();
+    const finalProgress = Math.max(1, Math.min(100, Number(progress) || (is_final ? 100 : 33)));
     let newEvidenceList = [];
 
     if (Array.isArray(evidences) && evidences.length > 0) {
@@ -1411,11 +1415,13 @@ export function ProjectProvider({ children }) {
         task_id: taskId,
         user_id: currentUser?.id,
         title: ev.title || ev.file_name || `Entregable ${idx + 1}`,
-        description: ev.description || '',
+        description: ev.description || (ev.deliverable_item ? `[${ev.deliverable_item}]` : ''),
         evidence_url: ev.evidence_url || ev.data_url || '',
         evidence_type: ev.evidence_type || 'documento',
         file_name: ev.file_name || ev.title || `archivo_${idx + 1}`,
         file_size: ev.file_size || '',
+        deliverable_item: ev.deliverable_item || deliverable_item || `Entregable ${idx + 1}`,
+        deliverable_pct: Number(ev.deliverable_pct || finalProgress),
         created_at: nowIso,
       }));
     } else if (evidence_url && evidence_title) {
@@ -1430,6 +1436,8 @@ export function ProjectProvider({ children }) {
           evidence_type,
           file_name: evidence_title,
           file_size: '',
+          deliverable_item: deliverable_item || 'Entregable',
+          deliverable_pct: finalProgress,
           created_at: nowIso,
         },
       ];
@@ -1457,8 +1465,8 @@ export function ProjectProvider({ children }) {
         .from('tasks')
         .update({
           status: 'en_revision',
-          progress: 100,
-          completed_at: nowIso,
+          progress: finalProgress,
+          completed_at: finalProgress >= 100 ? nowIso : null,
           deliverable_summary,
           updated_at: nowIso,
         })
@@ -1472,8 +1480,8 @@ export function ProjectProvider({ children }) {
           ? {
               ...t,
               status: 'en_revision',
-              progress: 100,
-              completed_at: nowIso,
+              progress: finalProgress,
+              completed_at: finalProgress >= 100 ? nowIso : null,
               deliverable_summary,
               evidences: [...newEvidenceList, ...(t.evidences || [])],
             }
@@ -1487,13 +1495,16 @@ export function ProjectProvider({ children }) {
 
     const firstUrl = newEvidenceList[0]?.evidence_url || evidence_url || '';
     const docsCount = newEvidenceList.length;
+    const isPartial = finalProgress < 100;
     await registerAutomaticChangelog({
-      title: `Actividad marcada como finalizada para revisión: ${targetTask.title}`,
-      description: `${currentUser?.full_name} completó la actividad "${targetTask.title}" y la envió a revisión del líder con ${docsCount} entregable(s). Resumen de entrega: ${deliverable_summary || 'Sin notas adicionales'}`,
+      title: isPartial
+        ? `Entregable parcial enviado a revisión (${finalProgress}%): ${targetTask.title}`
+        : `Actividad finalizada enviada a revisión (100%): ${targetTask.title}`,
+      description: `${currentUser?.full_name} envió ${docsCount} entregable(s) para revisión con un avance solicitado del ${finalProgress}%. Resumen: ${deliverable_summary || 'Sin notas adicionales'}`,
       taskId,
       commitOrPrUrl: firstUrl.startsWith('http') ? firstUrl : '',
       evidenceUrl: firstUrl.startsWith('http') ? firstUrl : '',
-      entryType: 'finalizacion',
+      entryType: 'revision_enviada',
     });
 
     const leadersAndAdmins = profiles
@@ -1502,20 +1513,42 @@ export function ProjectProvider({ children }) {
 
     await dispatchNotification({
       recipientIds: leadersAndAdmins,
-      title: 'Tarea enviada para revisión del Líder',
-      message: `${currentUser?.full_name} finalizó "${targetTask.title}" y solicita tu revisión y aprobación.`,
+      title: isPartial
+        ? `Entregable para revisión (${finalProgress}%)`
+        : 'Tarea finalizada para revisión (100%)',
+      message: `${currentUser?.full_name} envió entregable(s) en "${targetTask.title}" solicitando ${finalProgress}% de avance para tu revisión.`,
       notificationType: 'revision_enviada',
       relatedTaskId: taskId,
     });
   };
 
-  const reviewTaskByLeader = async (taskId, { decision, leader_feedback }) => {
+  const reviewTaskByLeader = async (
+    taskId,
+    { decision, leader_feedback = '', approved_progress = null, is_final = false }
+  ) => {
     const targetTask = tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
     const isApproved = decision === 'aprobar';
-    const nextStatus = isApproved ? 'completada' : 'devuelta';
-    const nextProgress = isApproved ? 100 : Math.min(targetTask.progress || 80, 85);
+    const isDevuelta = decision === 'devolver';
+
+    let nextProgress = targetTask.progress || 0;
+    let nextStatus = targetTask.status;
+
+    if (isApproved) {
+      if (approved_progress !== undefined && approved_progress !== null) {
+        nextProgress = Math.max(1, Math.min(100, Number(approved_progress)));
+      } else if (is_final) {
+        nextProgress = 100;
+      } else {
+        nextProgress = targetTask.progress || 100;
+      }
+      nextStatus = nextProgress >= 100 ? 'completada' : 'en_proceso';
+    } else if (isDevuelta) {
+      nextStatus = 'devuelta';
+      nextProgress = Math.min(targetTask.progress || 0, 85);
+    }
+
     const nowIso = new Date().toISOString();
 
     if (isSupabaseConfigured && supabase) {
@@ -1525,6 +1558,7 @@ export function ProjectProvider({ children }) {
           status: nextStatus,
           progress: nextProgress,
           leader_feedback,
+          completed_at: nextStatus === 'completada' ? nowIso : null,
           reviewed_by: currentUser?.id,
           reviewed_at: nowIso,
           updated_at: nowIso,
@@ -1533,27 +1567,39 @@ export function ProjectProvider({ children }) {
       if (error) throw error;
     }
 
-    setTasks((prev) =>
-      prev.map((t) =>
+    setTasks((prev) => {
+      const updated = prev.map((t) =>
         t.id === taskId
           ? {
               ...t,
               status: nextStatus,
               progress: nextProgress,
               leader_feedback,
+              completed_at: nextStatus === 'completada' ? nowIso : null,
               reviewed_by: currentUser?.id,
               reviewed_at: nowIso,
             }
           : t
-      )
-    );
+      );
+      try {
+        localStorage.setItem('NEXUS_PROJECT_TASKS_CACHE', JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
 
+    const isPartialApproval = isApproved && nextProgress < 100;
     await registerAutomaticChangelog({
       title: isApproved
-        ? `Tarea aprobada y completada: ${targetTask.title}`
+        ? isPartialApproval
+          ? `Entrega parcial aprobada (${nextProgress}%): ${targetTask.title}`
+          : `Tarea aprobada y completada (100%): ${targetTask.title}`
         : `Tarea devuelta para correcciones: ${targetTask.title}`,
       description: `${currentUser?.full_name} ${
-        isApproved ? 'aprobó satisfactoriamente' : 'devolvió con observaciones'
+        isApproved
+          ? isPartialApproval
+            ? `aprobó la entrega parcial al ${nextProgress}% de`
+            : 'aprobó y completó satisfactoriamente'
+          : 'devolvió con observaciones'
       } la tarea "${targetTask.title}". Comentario del líder: "${
         leader_feedback || 'Sin comentarios adicionales'
       }"`,
@@ -1563,14 +1609,72 @@ export function ProjectProvider({ children }) {
 
     await dispatchNotification({
       recipientIds: targetTask.assignee_ids || [],
-      title: isApproved ? '¡Tarea Aprobada por el Líder!' : 'Tarea devuelta para correcciones',
+      title: isApproved
+        ? isPartialApproval
+          ? `¡Entrega parcial aprobada (${nextProgress}%)!`
+          : '¡Tarea Aprobada y Completada por el Líder!'
+        : 'Tarea devuelta para correcciones',
       message: isApproved
-        ? `${currentUser?.full_name} aprobó tu entrega en "${targetTask.title}". ${
-            leader_feedback ? `Comentario: ${leader_feedback}` : ''
-          }`
+        ? isPartialApproval
+          ? `${currentUser?.full_name} aprobó el entregable al ${nextProgress}% en "${targetTask.title}". La actividad sigue activa para los siguientes entregables. ${
+              leader_feedback ? `Comentario: ${leader_feedback}` : ''
+            }`
+          : `${currentUser?.full_name} aprobó y culminó la tarea "${targetTask.title}". ${
+              leader_feedback ? `Comentario: ${leader_feedback}` : ''
+            }`
         : `${currentUser?.full_name} devolvió la tarea "${targetTask.title}" para ajustes: ${leader_feedback}`,
       notificationType: isApproved ? 'tarea_aprobada' : 'tarea_devuelta',
       relatedTaskId: taskId,
+    });
+  };
+
+  const adjustTaskProgressAndStatus = async (
+    taskId,
+    { progress, status = 'en_proceso', leader_feedback = '' }
+  ) => {
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+
+    const nextProgress = Math.max(0, Math.min(100, Number(progress)));
+    const nextStatus = status || (nextProgress >= 100 ? 'completada' : 'en_proceso');
+    const nowIso = new Date().toISOString();
+
+    if (isSupabaseConfigured && supabase) {
+      await supabase
+        .from('tasks')
+        .update({
+          progress: nextProgress,
+          status: nextStatus,
+          leader_feedback: leader_feedback || targetTask.leader_feedback,
+          completed_at: nextStatus === 'completada' ? nowIso : null,
+          updated_at: nowIso,
+        })
+        .eq('id', taskId);
+    }
+
+    setTasks((prev) => {
+      const updated = prev.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              progress: nextProgress,
+              status: nextStatus,
+              leader_feedback: leader_feedback || t.leader_feedback,
+              completed_at: nextStatus === 'completada' ? nowIso : null,
+            }
+          : t
+      );
+      try {
+        localStorage.setItem('NEXUS_PROJECT_TASKS_CACHE', JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
+
+    await registerAutomaticChangelog({
+      title: `Avance ajustado a ${nextProgress}%: ${targetTask.title}`,
+      description: `${currentUser?.full_name} ajustó el progreso de la tarea a ${nextProgress}% (Estado: ${nextStatus}).`,
+      taskId,
+      entryType: 'cambio_estado',
     });
   };
 
@@ -2042,6 +2146,7 @@ export function ProjectProvider({ children }) {
     updateTaskMemberProgress,
     submitTaskForLeaderReview,
     reviewTaskByLeader,
+    adjustTaskProgressAndStatus,
     deleteTask,
     sendTaskReminder,
     addManualChangelog,
